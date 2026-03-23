@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TrudNorm — Редактор схемы</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="toolbar">
+  <h1>TrudNorm — Редактор схемы</h1>
+  <div id="validIndicator" class="tbr-err-indicator" style="display:none">
+    ⚠ <span id="validCount"></span>
+    <div id="validTooltip" class="valid-tooltip"></div>
+  </div>
+  <div class="tbr-sep"></div>
+  <label class="tbr-label">Загрузить .tcScript<input type="file" accept=".tcScript,.vb,text/*" style="display:none" onchange="loadScript(event)"></label>
+  <button class="tbr-btn" onclick="saveScript()">Сохранить .tcScript</button>
+  <div class="tbr-sep"></div>
+  <button class="tbr-btn" onclick="loadExample()" style="opacity:0.7">Пример</button>
+  <div class="tbr-sep"></div>
+  <button class="tbr-btn" id="btnTogglePanel" onclick="togglePanel()">Показать код</button>
+</div>
+
+<div class="main">
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <span class="sh-title">Типы номенклатуры</span>
+      <button class="btn-primary btn-sm" onclick="addType()">+ Тип</button>
+    </div>
+    <div class="sidebar-body" id="sidebarBody"></div>
+    <div class="sidebar-header sidebar-header-sub">
+      <span class="sh-title">Таблицы коэффициентов</span>
+      <button class="btn-primary btn-sm" onclick="addCoefTable()">+ Таблица</button>
+    </div>
+    <div class="sidebar-body" id="sidebarTables"></div>
+  </div>
+
+  <div class="work-area layout-hidden" id="workArea">
+    <div class="editor" id="editor">
+      <div class="empty-state"><div class="icon">📄</div><p style="color:#aaa">Нет данных</p><small>Нажмите «+ Тип» или загрузите .tcScript</small></div>
+    </div>
+    <div class="code-resizer" id="codeResizer"></div>
+    <div class="code-panel" id="codePanel" style="height:300px">
+      <div class="code-panel-header">
+        <span class="cp-title">tcScript</span>
+        <button class="cp-btn" id="cpBtnBottom" onclick="setPanelPos('bottom')" title="Снизу">↓</button>
+        <button class="cp-btn active-pos" id="cpBtnRight" onclick="setPanelPos('right')" title="Справа">→</button>
+        <div class="cp-sep"></div>
+        <button class="cp-btn" onclick="copyCode(this)">Копировать</button>
+      </div>
+      <textarea id="codeOutput" readonly spellcheck="false" placeholder="Код генерируется автоматически при изменениях"></textarea>
+    </div>
+  </div>
+</div>
+
+<script src="js/state.js"></script>
+<script src="js/util.js"></script>
+<script src="js/validate.js"></script>
+<script src="js/resize.js"></script>
+<script src="js/render.js"></script>
+<script src="js/dnd.js"></script>
+<script src="js/generate.js"></script>
+<script src="js/load.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
