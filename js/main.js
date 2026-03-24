@@ -178,6 +178,7 @@ function updateTypeName(ti, val) {
 
 function updateOpFormula(ti, oi, val) {
   schema[ti].operations[oi].formula = val;
+  renderValidationBanner(); refreshEditorErrors();
   scheduleGen(false);
 }
 
@@ -251,12 +252,14 @@ function updateBranchCondField(ti, oi, bi, gi, ci, field, val) {
     if (p && !['Integer','Float'].includes(p.type) && ['<','>','≤','≥'].includes(c.op)) c.op = '=';
     renderEditor(); scheduleGen(true);
   } else {
+    renderValidationBanner(); refreshEditorErrors();
     scheduleGen(false);
   }
 }
 
 function updateBranchFormula(ti, oi, bi, val) {
   schema[ti].operations[oi].formulaBranches[bi].formula = val;
+  renderValidationBanner(); refreshEditorErrors();
   scheduleGen(false);
 }
 
@@ -789,12 +792,14 @@ function updateFieldBranchCond(ti, oi, field, bi, gi, ci, f, val) {
     if (p && !['Integer','Float'].includes(p.type) && ['<','>','≤','≥'].includes(c.op)) c.op = '=';
     renderEditor(); scheduleGen(true);
   } else {
+    renderValidationBanner(); refreshEditorErrors();
     scheduleGen(false);
   }
 }
 
 function updateFieldBranchValue(ti, oi, field, bi, val) {
   schema[ti].operations[oi][field + 'Branches'][bi].value = val;
+  renderValidationBanner(); refreshEditorErrors();
   scheduleGen(false);
 }
 
@@ -858,6 +863,7 @@ function updateProtoBranchCondField(ti, oi, bi, gi, ci, field, val) {
     if (p && !['Integer','Float'].includes(p.type) && ['<','>','≤','≥'].includes(c.op)) c.op = '=';
     renderEditor(); scheduleGen(true);
   } else {
+    renderValidationBanner(); refreshEditorErrors();
     scheduleGen(false);
   }
 }
@@ -874,6 +880,7 @@ function deleteProtoBranchLine(ti, oi, bi, li) {
 
 function updateProtoBranchLine(ti, oi, bi, li, val) {
   schema[ti].operations[oi].protocolBranches[bi].protocol[li] = val;
+  renderValidationBanner(); refreshEditorErrors();
   scheduleGen(false);
 }
 
@@ -913,6 +920,7 @@ function deleteProtocolLine(ti, oi, li) {
 
 function updateProtocolLine(ti, oi, li, val) {
   schema[ti].operations[oi].protocol[li] = val;
+  renderValidationBanner(); refreshEditorErrors();
   scheduleGen(false);
 }
 
@@ -929,6 +937,7 @@ function updateOp(ti, oi, field, val) {
     const inp = document.getElementById('fld-op-code');
     if (inp) inp.classList.toggle('err', !val || dupOps.has(val));
   }
+  renderValidationBanner(); refreshEditorErrors();
   scheduleGen(false);
 }
 
@@ -948,6 +957,7 @@ function updateParam(scope, ti, oi, pi, field, val) {
     });
     if (scope === 'op') refreshFormulaChips(ti, oi);
   }
+  renderValidationBanner(); refreshEditorErrors();
   scheduleGen(false);
 }
 
@@ -1128,55 +1138,157 @@ function applyLayout() {
 function loadExample() {
   schema = [
     {
-      name: "Труба",
+      name: "Трубопровод",
       paramSets: [
         {
           name: "Базовые",
           params: [
-            { name: "Кол-во резов, шт.", code: "C_CUTS", type: "Integer", defaultVal: "0" },
-            { name: "Материал", code: "MATERIAL", type: "List", defaultVal: "Коррозионно-стойкая сталь;Легированная сталь;Медь МЗр;Углеродистая сталь" },
-            { name: "Диаметр трубы, мм", code: "DN_DY", type: "Float", defaultVal: "0.0" },
-            { name: "Толщина, мм", code: "THICK", type: "Integer", defaultVal: "0" },
+            { name: "Материал", code: "MATERIAL", type: "List", defaultVal: "Коррозионно-стойкая сталь;Легированная сталь;Углеродистая сталь" },
+            { name: "Диаметр, мм", code: "DN", type: "Float", defaultVal: "0.0" },
+            { name: "Толщина стенки, мм", code: "THICK", type: "Integer", defaultVal: "0" },
             { name: "Длина, м", code: "L_PIPE", type: "Float", defaultVal: "0.0" }
           ]
         }
       ],
       operations: [
-        { name: "Запуск труб в производство, ознакомление с РКД", shts: "А17-3р", prof: "19240", code: "T_1", params: [],
-          formula: "{p.DN_DY} * 0.0053 * {p.C_CUTS}",
-          protocol: ["Расчёт по нормативу ГКЛИ.3520-109-2018 Карта 1", "Расчёт: {p.DN_DY} * 0.0053 * {p.C_CUTS} = {VALUE}"] },
-        { name: "Изготовление шаблонов и снятие размеров с места", shts: "А16-4р", prof: "19240", code: "T_2", params: [
-          { name: "Место выполнения", code: "PLACE_JOB", type: "List", defaultVal: "На судне;По плазовой разметке" },
-          { name: "Коэффициент неудобства", code: "DISCOMF", type: "List", defaultVal: "-;на плоской поверхности;в потолочном положении;для неудобных условий" }
-        ], formula: "", protocol: [] },
-        { name: "Резка на станке", shts: "А17-3р", prof: "17928", code: "T_3", params: [
-          { name: "Кол-во резов, шт.", code: "C_CUTS", type: "Integer", defaultVal: "0" }
-        ], formula: "{p.C_CUTS} * 0.12", protocol: ["Расчёт резов: {p.C_CUTS} * 0.12 = {VALUE}"] },
-        { name: "Гидроиспытание труб", shts: "А17-3р", prof: "12597", code: "T_4", params: [
-          { name: "Тип заглушки", code: "T_ZAGL", type: "List", defaultVal: "Быстросъемные;Резьбовые;Фланцевые" },
-          { name: "Кол-во заглушек, шт", code: "C_PLUGS", type: "Integer", defaultVal: "0" },
-          { name: "Давление, МПа", code: "C_PRESSURE", type: "Integer", defaultVal: "0" }
-        ], formula: "{p.C_PLUGS} * {p.C_PRESSURE} * 0.05", protocol: [] }
+        {
+          name: "Подготовка к работе",
+          shts: "А17-2р", prof: "19240",
+          code: "T_PREP",
+          params: [],
+          normTables: ["ГКЛИ.3520-109 Карта 1"],
+          formula: "{p.L_PIPE} * 0.02",
+          protocol: [
+            "Операция «{NAME}»",
+            "Расчёт: {p.L_PIPE} * 0.02 = {VALUE} н/ч",
+            "Код профессии {PROF}, разряд {SHTS}",
+            ""
+          ]
+        },
+        {
+          name: "Резка труб",
+          shts: "А17-3р", prof: "19240",
+          code: "T_CUT",
+          params: [
+            { name: "Количество резов, шт.", code: "C_CUTS", type: "Integer", defaultVal: "0" }
+          ],
+          normTables: ["ГКЛИ.3520-109 Карта 3"],
+          formula: "{p.C_CUTS} * {K.K_MAT} * 0.15",
+          protocol: [
+            "Операция «{NAME}»",
+            "Расчёт: {p.C_CUTS} * K_MAT * 0.15 = {VALUE} н/ч",
+            ""
+          ]
+        },
+        {
+          name: "Гибка труб",
+          shts: undefined,
+          shtsBranches: [
+            { conditionGroups: [[{ code: "THICK", op: "<", value: "5" }]], value: "А16-3р" },
+            { conditionGroups: [], value: "А17-4р" }
+          ],
+          prof: undefined,
+          profBranches: [
+            { conditionGroups: [[{ code: "MATERIAL", op: "=", value: "Коррозионно-стойкая сталь" }]], value: "19256" },
+            { conditionGroups: [], value: "19240" }
+          ],
+          code: "T_BEND",
+          params: [],
+          normTables: [],
+          formula: "{p.DN} * {p.L_PIPE} * {K.K_DN} * 0.1",
+          protocol: [
+            "Операция «{NAME}»",
+            "Расчёт: {p.DN} * {p.L_PIPE} * K_DN * 0.1 = {VALUE} н/ч",
+            ""
+          ]
+        },
+        {
+          name: "Сварка стыков",
+          shts: "А17-4р", prof: "19256",
+          code: "T_WELD",
+          params: [
+            { name: "Количество стыков, шт.", code: "C_WELDS", type: "Integer", defaultVal: "0" }
+          ],
+          normTables: [],
+          formula: undefined,
+          formulaBranches: [
+            { conditionGroups: [[{ code: "MATERIAL", op: "=", value: "Коррозионно-стойкая сталь" }]], formula: "{p.C_WELDS} * {K.K_MAT} * 2.5" },
+            { conditionGroups: [[{ code: "MATERIAL", op: "=", value: "Легированная сталь" }], [{ code: "MATERIAL", op: "=", value: "Углеродистая сталь" }, { code: "THICK", op: "≥", value: "5" }]], formula: "{p.C_WELDS} * {K.K_MAT} * 2.0" },
+            { conditionGroups: [], formula: "{p.C_WELDS} * {K.K_MAT} * 1.8" }
+          ],
+          protocol: [
+            "Операция «{NAME}»",
+            "Материал: {p.MATERIAL}",
+            "Расчёт: C_WELDS * K_MAT * норматив = {VALUE} н/ч",
+            ""
+          ]
+        },
+        {
+          name: "Гидроиспытание",
+          shts: "А17-3р", prof: "12597",
+          code: "T_TEST",
+          params: [
+            { name: "Давление, МПа", code: "PRESS", type: "Integer", defaultVal: "0" }
+          ],
+          normTables: ["ГКЛИ.3520-109 Карта 7"],
+          formula: "({op.T_WELD} + {p.L_PIPE} * 0.05) * {p.PRESS} * 0.1",
+          protocol: undefined,
+          protocolBranches: [
+            {
+              conditionGroups: [[{ code: "PRESS", op: "≥", value: "10" }]],
+              protocol: [
+                "Операция «{NAME}» — ВЫСОКОЕ ДАВЛЕНИЕ",
+                "Давление {p.PRESS} МПа (повышенный режим)",
+                "Расчёт: (T_WELD + {p.L_PIPE} * 0.05) * {p.PRESS} * 0.1 = {VALUE} н/ч",
+                ""
+              ]
+            },
+            {
+              conditionGroups: [],
+              protocol: [
+                "Операция «{NAME}»",
+                "Давление {p.PRESS} МПа",
+                "Расчёт: (T_WELD + {p.L_PIPE} * 0.05) * {p.PRESS} * 0.1 = {VALUE} н/ч",
+                ""
+              ]
+            }
+          ]
+        }
       ]
     }
   ];
+  // fix undefined fields
+  schema[0].operations.forEach(op => {
+    if (op.formula === undefined) op.formula = '';
+    if (op.protocol === undefined) op.protocol = [];
+    if (op.shts === undefined) op.shts = '';
+    if (op.prof === undefined) op.prof = '';
+  });
   coefTables = [
     {
-      name: 'Коэффициент по материалу и диаметру',
-      code: 'K_MAT_DN',
+      name: "Коэффициент по материалу",
+      code: "K_MAT",
       defaultVal: 1,
-      keys: ['MATERIAL', 'DN_DY'],
+      keys: ["MATERIAL"],
       rows: [
-        ['Коррозионно-стойкая сталь', '<50',  '1.2'],
-        ['Коррозионно-стойкая сталь', '>=50', '1.5'],
-        ['Легированная сталь',        '<50',  '1.0'],
-        ['Легированная сталь',        '>=50', '1.3'],
-        ['Медь МЗр',                  '*',    '1.8'],
-        ['Углеродистая сталь',        '*',    '0.9'],
+        ["Коррозионно-стойкая сталь", "1.4"],
+        ["Легированная сталь",        "1.1"],
+        ["Углеродистая сталь",        "0.9"]
+      ]
+    },
+    {
+      name: "Коэффициент по диаметру",
+      code: "K_DN",
+      defaultVal: 1,
+      keys: ["DN"],
+      rows: [
+        ["<50",   "0.8"],
+        ["<100",  "1.0"],
+        [">=100", "1.3"]
       ]
     }
   ];
-  sel = { kind:'type', ti: 0 };
+  sel = { kind: 'type', ti: 0 };
   expandedTypes = new Set([0]);
   renderAll(true);
 }

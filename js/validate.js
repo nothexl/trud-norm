@@ -217,9 +217,14 @@ function renderValidationBanner() {
           else _checkFormula(b.formula, `${ctx}, формула`);
           if (errors.length > _bfFml0) _setFE('formulaBranch', bi);
         });
-      } else if (op.formula) {
-        _checkFormula(op.formula, `${opCtx}, формула`);
-        if (errors.length > _fe0) _setFE('formula');
+      } else {
+        if (!op.formula) {
+          errors.push(`${opCtx}: формула не задана`);
+          _setFE('formula');
+        } else {
+          _checkFormula(op.formula, `${opCtx}, формула`);
+          if (errors.length > _fe0) _setFE('formula');
+        }
       }
       if (op.protocolBranches) {
         op.protocolBranches.forEach((b, bi) => {
