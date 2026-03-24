@@ -20,7 +20,9 @@ function generateCode() {
     coefTables.forEach((tbl, ti) => {
       const last = ti === coefTables.length - 1;
       const keysVb = tbl.keys.map(k => `"${vb(k)}"`).join(', ');
-      out.push(`  Array("${vb(tbl.name)}", "${vb(tbl.code)}", "${tbl.valueType}", _`);
+      const defF = parseFloat(tbl.defaultVal); const defV = isNaN(defF) ? 1 : defF;
+      const defStr = Number.isInteger(defV) ? `${defV}.0` : String(defV);
+      out.push(`  Array("${vb(tbl.name)}", "${vb(tbl.code)}", ${defStr}, _`);
       out.push(`    Array(${keysVb}), _`);
       if (tbl.rows.length === 0) {
         out.push(`    Array() _`);

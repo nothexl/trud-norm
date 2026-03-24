@@ -31,7 +31,7 @@ function parseCoefTablesFromScript(text) {
       return {
         name: String(tblArr[0] || ''),
         code: String(tblArr[1] || ''),
-        valueType: String(tblArr[2] || 'Float'),
+        defaultVal: (() => { const f = parseFloat(tblArr[2]); return isNaN(f) ? 1 : f; })(),
         keys: Array.isArray(tblArr[3]) ? tblArr[3].map(String) : [],
         rows: Array.isArray(tblArr[4]) ? tblArr[4].map(row => Array.isArray(row) ? row.map(String) : []) : []
       };

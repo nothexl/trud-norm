@@ -539,12 +539,9 @@ function renderTableEditor(idx) {
             oninput="updateCoefTableCode(${idx},this.value)" placeholder="Код">
         </div>
         <div class="field-row">
-          <span class="field-label">Тип значений</span>
-          <select class="field-input" onchange="updateCoefTableMeta(${idx},'valueType',this.value)">
-            ${['Float','Integer','String'].map(t =>
-              `<option value="${t}"${tbl.valueType===t?' selected':''}>${t}</option>`
-            ).join('')}
-          </select>
+          <span class="field-label">Значение по умолчанию</span>
+          <input class="field-input" type="number" step="0.01" value="${tbl.defaultVal ?? 1}"
+            oninput="updateCoefTableMeta(${idx},'defaultVal',parseFloat(this.value)||0)">
         </div>
       </div>
     </div>

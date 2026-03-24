@@ -580,7 +580,7 @@ function addCoefTable() {
   const usedCodes = new Set(coefTables.map(t => t.code));
   let n = 1;
   while (usedCodes.has('K_NEW_' + n)) n++;
-  coefTables.push({ name: '', code: 'K_NEW_' + n, valueType: 'Float', keys: [], rows: [] });
+  coefTables.push({ name: '', code: 'K_NEW_' + n, defaultVal: 1, keys: [], rows: [] });
   sel = { kind: 'table', idx: coefTables.length - 1 };
   renderSidebarTables();
   renderEditor();
@@ -779,7 +779,7 @@ function loadExample() {
     {
       name: 'Коэффициент по материалу и диаметру',
       code: 'K_MAT_DN',
-      valueType: 'Float',
+      defaultVal: 1,
       keys: ['MATERIAL', 'DN_DY'],
       rows: [
         ['Коррозионно-стойкая сталь', '<50',  '1.2'],
