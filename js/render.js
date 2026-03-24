@@ -157,7 +157,7 @@ function renderTypeEditor(ti) {
                 const dupErr = getDupCodes(ps.params).size > 0;
                 const nameErr = !ps.name || dupSetNames.has(ps.name);
                 const canDup = type.paramSets.length < 5;
-                return `<div class="paramset-card${(dupErr || nameErr) ? ' has-err' : ''}" onclick="openParamSet(${ti},${si})">
+                return `<div class="paramset-card${(dupErr || nameErr) ? ' has-err' : ''}" draggable="true" ondragstart="psDragStart(event,${ti},${si})" ondragover="psDragOver(event)" ondragleave="psDragLeave(event)" ondrop="psDrop(event,${ti},${si})" ondragend="psDragEnd(event)" onclick="openParamSet(${ti},${si})">
                   <div class="psc-body">
                     <div class="psc-name">${ps.name ? esc(ps.name) : '<span style="color:#bbb;font-style:italic">без названия</span>'}</div>
                     <div class="psc-meta">${ps.params.length} пар.</div>
@@ -245,22 +245,17 @@ function renderOpEditor(ti, oi) {
       <div class="section-body op-grid">
         <div class="field-row">
           <span class="field-label">Название операции</span>
-          <input class="field-input" type="text" value="${esc(op.name)}" oninput="updateOp(${ti},${oi},'name',this.value)" placeholder="Название">
+          <input id="fld-op-name" class="field-input" type="text" value="${esc(op.name)}" oninput="updateOp(${ti},${oi},'name',this.value)" placeholder="Название">
         </div>
         <div class="field-row">
           <span class="field-label">Код формулы</span>
           <input class="field-input${codeErr ? ' err' : ''}" id="fld-op-code" type="text" value="${esc(op.code)}" oninput="updateOp(${ti},${oi},'code',this.value)" placeholder="T_1">
         </div>
-        <div class="field-row">
-          <span class="field-label">ШТС</span>
-          <input class="field-input" type="text" value="${esc(op.shts)}" oninput="updateOp(${ti},${oi},'shts',this.value)" placeholder="А17-3р">
-        </div>
-        <div class="field-row">
-          <span class="field-label">Профессия (код)</span>
-          <input class="field-input" type="text" value="${esc(op.prof)}" oninput="updateOp(${ti},${oi},'prof',this.value)" placeholder="19240">
-        </div>
       </div>
     </div>
+    ${renderOpFieldSection(ti, oi, 'shts', 'ШТС', 'Разряд')}
+    ${renderOpFieldSection(ti, oi, 'prof', 'Профессия (код)', 'Код профессии')}
+    ${renderNormTablesSection(ti, oi)}
     <div class="section">
       <div class="section-title">
         <span class="stitle">Уникальные параметры операции ${paramTag}</span>
@@ -272,7 +267,6 @@ function renderOpEditor(ti, oi) {
           : renderParamsTable('op', ti, oi, op.params, dupParams)}
       </div>
     </div>
-    ${renderNormTablesSection(ti, oi)}
     ${renderPlaceholderHints(ti, oi)}
     ${renderFormulaSection(ti, oi)}
     ${renderOpProtocolSection(ti, oi)}`;
@@ -309,20 +303,99 @@ function renderFormulaSection(ti, oi) {
   const op = schema[ti].operations[oi];
   const fn = (name, title) =>
     `<button class="formula-chip fn-chip" onmousedown="event.preventDefault()" onclick="insertFnAtActive('${name}')" title="${title}">${name}</button>`;
+  const chips = `<div class="formula-chips" style="margin-top:7px">
+    <span class="chip-label">Функции:</span>
+    ${fn('Abs','Abs(x) — модуль')}${fn('Int','Int(x) — целая часть (вниз)')}${fn('Fix','Fix(x) — целая часть (отсечение)')}${fn('Round','Round(x, n) — округление')}${fn('Sqr','Sqr(x) — квадратный корень')}${fn('Exp','Exp(x) — e^x')}${fn('Log','Log(x) — натуральный логарифм')}${fn('Sin','Sin(x) — синус')}${fn('Cos','Cos(x) — косинус')}${fn('Tan','Tan(x) — тангенс')}
+    <span class="chip-sep"></span>
+    <button class="formula-chip fn-chip" onmousedown="event.preventDefault()" onclick="insertAtActive('^')" title="Возведение в степень: x ^ n">^</button>
+    <button class="formula-chip fn-chip" onmousedown="event.preventDefault()" onclick="insertAtActive('\\x5C')" title="Целочисленное деление: x \\ n">\\</button>
+    <button class="formula-chip fn-chip" onmousedown="event.preventDefault()" onclick="insertAtActive('Mod')" title="Остаток от деления: x Mod n">Mod</button>
+  </div>`;
+
+  if (op.formulaBranches) {
+    const allParams = getAllOpParams(ti, oi);
+    const buildCondRow = (c, bi, gi, ci) => {
+      const param = allParams.find(p => p.code === c.code);
+      const pType = param ? param.type : 'String';
+      const numTypes = ['Integer', 'Float'];
+      const ops = numTypes.includes(pType) ? ['=','≠','<','>','≤','≥'] : ['=','≠'];
+      const opOpts = ops.map(o => `<option value="${o}"${c.op===o?' selected':''}>${o}</option>`).join('');
+      const paramOpts = allParams.map(p => `<option value="${esc(p.code)}"${p.code===c.code?' selected':''}>${esc(p.name||p.code)}</option>`).join('');
+      let valInput;
+      const valId = `fld-cv-${bi}-${gi}-${ci}`;
+      if (pType === 'List') {
+        const vals = (param.defaultVal||'').split(';').filter(Boolean);
+        valInput = `<select id="${valId}" class="fb-val-inp" onchange="updateBranchCondField(${ti},${oi},${bi},${gi},${ci},'value',this.value)">${vals.map(v=>`<option value="${esc(v)}"${c.value===v?' selected':''}>${esc(v)}</option>`).join('')}</select>`;
+      } else if (pType === 'Boolean') {
+        valInput = `<select id="${valId}" class="fb-val-inp" onchange="updateBranchCondField(${ti},${oi},${bi},${gi},${ci},'value',this.value)"><option value="True"${c.value==='True'?' selected':''}>True</option><option value="False"${c.value==='False'?' selected':''}>False</option></select>`;
+      } else if (numTypes.includes(pType)) {
+        valInput = `<input id="${valId}" type="number" class="fb-val-inp" value="${esc(c.value)}" oninput="updateBranchCondField(${ti},${oi},${bi},${gi},${ci},'value',this.value)">`;
+      } else {
+        valInput = `<input id="${valId}" type="text" class="fb-val-inp" value="${esc(c.value)}" placeholder="Значение" oninput="updateBranchCondField(${ti},${oi},${bi},${gi},${ci},'value',this.value)">`;
+      }
+      return `<div class="fb-cond-row">
+        <select class="fb-param-sel" onchange="updateBranchCondField(${ti},${oi},${bi},${gi},${ci},'code',this.value)">${paramOpts}</select>
+        <select class="fb-op-sel" onchange="updateBranchCondField(${ti},${oi},${bi},${gi},${ci},'op',this.value)">${opOpts}</select>
+        ${valInput}
+        <button class="tbl-btn del-btn" onclick="removeBranchCondition(${ti},${oi},${bi},${gi},${ci})">✕</button>
+      </div>`;
+    };
+    const cards = op.formulaBranches.map((b, bi) => {
+      const isDefault = bi === op.formulaBranches.length - 1;
+      let condHtml = '';
+      if (!isDefault) {
+        const groups = b.conditionGroups || [];
+        const groupsHtml = groups.map((group, gi) => {
+          const rows = group.map((c, ci) => buildCondRow(c, bi, gi, ci)).join('');
+          const orSep = gi > 0 ? `<div class="fb-or-sep"><span>Или</span></div>` : '';
+          return `${orSep}<div class="fb-group">
+            ${rows}
+            <button class="tbl-btn fb-add-cond-btn" onclick="addBranchCondition(${ti},${oi},${bi},${gi})">+ И</button>
+          </div>`;
+        }).join('');
+        condHtml = `<div class="fb-cond-section">
+          ${groupsHtml || `<span class="fb-no-cond">Нет условий</span>`}
+          <button class="tbl-btn fb-add-or-btn" onclick="addBranchOrGroup(${ti},${oi},${bi})">+ Или</button>
+        </div>`;
+      }
+      return `<div class="fb-card${isDefault?' fb-card-default':''}">
+        <div class="fb-card-header">
+          <span class="fb-card-title">${isDefault ? 'По умолчанию' : `Вариант ${bi+1}`}</span>
+          ${isDefault ? '' : `<button class="tbl-btn del-btn" onclick="removeFormulaBranch(${ti},${oi},${bi})">✕</button>`}
+        </div>
+        ${condHtml}
+        <div class="fb-formula-wrap">
+          <textarea id="fld-fbf-${bi}" class="formula-ta fb-formula-ta" rows="2"
+            oninput="updateBranchFormula(${ti},${oi},${bi},this.value)"
+            placeholder="Формула">${esc(b.formula)}</textarea>
+        </div>
+      </div>`;
+    }).join('');
+    return `<div class="section">
+      <div class="section-title">
+        <span class="stitle">Варианты формулы</span>
+        <button class="btn-secondary btn-sm" onclick="openFormulaTest(${ti},${oi})">Проверка</button>
+        <button class="btn-secondary btn-sm" onclick="addFormulaBranch(${ti},${oi})">+ Вариант</button>
+        <button class="btn-secondary btn-sm" onclick="convertToSimpleFormula(${ti},${oi})">↩ Убрать варианты</button>
+      </div>
+      <div class="section-body">
+        <div class="fb-cards">${cards}</div>
+        ${chips}
+      </div>
+    </div>`;
+  }
+
   return `<div class="section">
-    <div class="section-title"><span class="stitle">Формула</span><button class="btn-secondary btn-sm" onclick="openFormulaTest(${ti},${oi})">Проверка</button></div>
+    <div class="section-title">
+      <span class="stitle">Формула</span>
+      <button class="btn-secondary btn-sm" onclick="openFormulaTest(${ti},${oi})">Проверка</button>
+      <button class="btn-secondary btn-sm" onclick="addFormulaBranch(${ti},${oi})">+ Условие</button>
+    </div>
     <div class="section-body">
       <textarea id="fld-formula" class="formula-ta" rows="2"
         oninput="updateOpFormula(${ti},${oi},this.value)"
         placeholder="Формула">${esc(op.formula)}</textarea>
-      <div class="formula-chips" style="margin-top:7px">
-        <span class="chip-label">Функции:</span>
-        ${fn('Abs','Abs(x) — модуль')}${fn('Int','Int(x) — целая часть (вниз)')}${fn('Fix','Fix(x) — целая часть (отсечение)')}${fn('Round','Round(x, n) — округление')}${fn('Sqr','Sqr(x) — квадратный корень')}${fn('Exp','Exp(x) — e^x')}${fn('Log','Log(x) — натуральный логарифм')}${fn('Sin','Sin(x) — синус')}${fn('Cos','Cos(x) — косинус')}${fn('Tan','Tan(x) — тангенс')}
-        <span class="chip-sep"></span>
-        <button class="formula-chip fn-chip" onmousedown="event.preventDefault()" onclick="insertAtActive('^')" title="Возведение в степень: x ^ n">^</button>
-        <button class="formula-chip fn-chip" onmousedown="event.preventDefault()" onclick="insertAtActive('\\x5C')" title="Целочисленное деление: x \\ n">\\</button>
-        <button class="formula-chip fn-chip" onmousedown="event.preventDefault()" onclick="insertAtActive('Mod')" title="Остаток от деления: x Mod n">Mod</button>
-      </div>
+      ${chips}
     </div>
   </div>`;
 }
@@ -367,18 +440,197 @@ function renderNormTablesSection(ti, oi) {
   </div>`;
 }
 
+function renderOpFieldSection(ti, oi, field, label, placeholder) {
+  const op = schema[ti].operations[oi];
+  const branchKey = field + 'Branches';
+  if (op[branchKey]) {
+    const allParams = getAllOpParams(ti, oi);
+    const buildCondRow = (c, bi, gi, ci) => {
+      const param = allParams.find(p => p.code === c.code);
+      const pType = param ? param.type : 'String';
+      const numTypes = ['Integer', 'Float'];
+      const ops = numTypes.includes(pType) ? ['=','≠','<','>','≤','≥'] : ['=','≠'];
+      const opOpts = ops.map(o => `<option value="${o}"${c.op===o?' selected':''}>${o}</option>`).join('');
+      const paramOpts = allParams.map(p => `<option value="${esc(p.code)}"${p.code===c.code?' selected':''}>${esc(p.name||p.code)}</option>`).join('');
+      const valId = `fld-fc-${field}-${bi}-${gi}-${ci}`;
+      let valInput;
+      if (pType === 'List') {
+        const vals = (param.defaultVal||'').split(';').filter(Boolean);
+        valInput = `<select id="${valId}" class="fb-val-inp" onchange="updateFieldBranchCond(${ti},${oi},'${field}',${bi},${gi},${ci},'value',this.value)">${vals.map(v=>`<option value="${esc(v)}"${c.value===v?' selected':''}>${esc(v)}</option>`).join('')}</select>`;
+      } else if (pType === 'Boolean') {
+        valInput = `<select id="${valId}" class="fb-val-inp" onchange="updateFieldBranchCond(${ti},${oi},'${field}',${bi},${gi},${ci},'value',this.value)"><option value="True"${c.value==='True'?' selected':''}>True</option><option value="False"${c.value==='False'?' selected':''}>False</option></select>`;
+      } else if (numTypes.includes(pType)) {
+        valInput = `<input id="${valId}" type="number" class="fb-val-inp" value="${esc(c.value)}" oninput="updateFieldBranchCond(${ti},${oi},'${field}',${bi},${gi},${ci},'value',this.value)">`;
+      } else {
+        valInput = `<input id="${valId}" type="text" class="fb-val-inp" value="${esc(c.value)}" placeholder="Значение" oninput="updateFieldBranchCond(${ti},${oi},'${field}',${bi},${gi},${ci},'value',this.value)">`;
+      }
+      return `<div class="fb-cond-row">
+        <select class="fb-param-sel" onchange="updateFieldBranchCond(${ti},${oi},'${field}',${bi},${gi},${ci},'code',this.value)">${paramOpts}</select>
+        <select class="fb-op-sel" onchange="updateFieldBranchCond(${ti},${oi},'${field}',${bi},${gi},${ci},'op',this.value)">${opOpts}</select>
+        ${valInput}
+        <button class="tbl-btn del-btn" onclick="removeFieldBranchCond(${ti},${oi},'${field}',${bi},${gi},${ci})">✕</button>
+      </div>`;
+    };
+    const cards = op[branchKey].map((b, bi) => {
+      const isDefault = bi === op[branchKey].length - 1;
+      let condHtml = '';
+      if (!isDefault) {
+        const groups = b.conditionGroups || [];
+        const groupsHtml = groups.map((group, gi) => {
+          const rows = group.map((c, ci) => buildCondRow(c, bi, gi, ci)).join('');
+          const orSep = gi > 0 ? `<div class="fb-or-sep"><span>Или</span></div>` : '';
+          return `${orSep}<div class="fb-group">
+            ${rows}
+            <button class="tbl-btn fb-add-cond-btn" onclick="addFieldBranchCond(${ti},${oi},'${field}',${bi},${gi})">+ И</button>
+          </div>`;
+        }).join('');
+        condHtml = `<div class="fb-cond-section">
+          ${groupsHtml || `<span class="fb-no-cond">Нет условий</span>`}
+          <button class="tbl-btn fb-add-or-btn" onclick="addFieldBranchOrGroup(${ti},${oi},'${field}',${bi})">+ Или</button>
+        </div>`;
+      }
+      return `<div class="fb-card${isDefault?' fb-card-default':''}">
+        <div class="fb-card-header">
+          <span class="fb-card-title">${isDefault ? 'По умолчанию' : `Вариант ${bi+1}`}</span>
+          ${isDefault ? '' : `<button class="tbl-btn del-btn" onclick="removeFieldBranch(${ti},${oi},'${field}',${bi})">✕</button>`}
+        </div>
+        ${condHtml}
+        <div class="fb-formula-wrap">
+          <input id="fld-fv-${field}-${bi}" type="text" class="field-input" value="${esc(b.value)}"
+            oninput="updateFieldBranchValue(${ti},${oi},'${field}',${bi},this.value)"
+            placeholder="${esc(placeholder)}">
+        </div>
+      </div>`;
+    }).join('');
+    return `<div class="section">
+      <div class="section-title">
+        <span class="stitle">${esc(label)}</span>
+        <button class="btn-secondary btn-sm" onclick="addFieldBranch(${ti},${oi},'${field}')">+ Вариант</button>
+        <button class="btn-secondary btn-sm" onclick="convertToSimpleField(${ti},${oi},'${field}')">↩ Убрать варианты</button>
+      </div>
+      <div class="section-body"><div class="fb-cards">${cards}</div></div>
+    </div>`;
+  }
+  return `<div class="section">
+    <div class="section-title">
+      <span class="stitle">${esc(label)}</span>
+      <button class="btn-secondary btn-sm" onclick="addFieldBranch(${ti},${oi},'${field}')">+ Условие</button>
+    </div>
+    <div class="section-body">
+      <input id="fld-op-${field}" type="text" class="field-input" value="${esc(op[field])}"
+        oninput="updateOp(${ti},${oi},'${field}',this.value)"
+        placeholder="${esc(placeholder)}">
+    </div>
+  </div>`;
+}
+
 function renderOpProtocolSection(ti, oi) {
   const op = schema[ti].operations[oi];
+
+  if (op.protocolBranches) {
+    const allParams = getAllOpParams(ti, oi);
+    const buildCondRow = (c, bi, gi, ci) => {
+      const param = allParams.find(p => p.code === c.code);
+      const pType = param ? param.type : 'String';
+      const numTypes = ['Integer', 'Float'];
+      const ops = numTypes.includes(pType) ? ['=','≠','<','>','≤','≥'] : ['=','≠'];
+      const opOpts = ops.map(o => `<option value="${o}"${c.op===o?' selected':''}>${o}</option>`).join('');
+      const paramOpts = allParams.map(p => `<option value="${esc(p.code)}"${p.code===c.code?' selected':''}>${esc(p.name||p.code)}</option>`).join('');
+      const valId = `fld-pbc-${bi}-${gi}-${ci}`;
+      let valInput;
+      if (pType === 'List') {
+        const vals = (param.defaultVal||'').split(';').filter(Boolean);
+        valInput = `<select id="${valId}" class="fb-val-inp" onchange="updateProtoBranchCondField(${ti},${oi},${bi},${gi},${ci},'value',this.value)">${vals.map(v=>`<option value="${esc(v)}"${c.value===v?' selected':''}>${esc(v)}</option>`).join('')}</select>`;
+      } else if (pType === 'Boolean') {
+        valInput = `<select id="${valId}" class="fb-val-inp" onchange="updateProtoBranchCondField(${ti},${oi},${bi},${gi},${ci},'value',this.value)"><option value="True"${c.value==='True'?' selected':''}>True</option><option value="False"${c.value==='False'?' selected':''}>False</option></select>`;
+      } else if (numTypes.includes(pType)) {
+        valInput = `<input id="${valId}" type="number" class="fb-val-inp" value="${esc(c.value)}" oninput="updateProtoBranchCondField(${ti},${oi},${bi},${gi},${ci},'value',this.value)">`;
+      } else {
+        valInput = `<input id="${valId}" type="text" class="fb-val-inp" value="${esc(c.value)}" placeholder="Значение" oninput="updateProtoBranchCondField(${ti},${oi},${bi},${gi},${ci},'value',this.value)">`;
+      }
+      return `<div class="fb-cond-row">
+        <select class="fb-param-sel" onchange="updateProtoBranchCondField(${ti},${oi},${bi},${gi},${ci},'code',this.value)">${paramOpts}</select>
+        <select class="fb-op-sel" onchange="updateProtoBranchCondField(${ti},${oi},${bi},${gi},${ci},'op',this.value)">${opOpts}</select>
+        ${valInput}
+        <button class="tbl-btn del-btn" onclick="removeProtoBranchCondition(${ti},${oi},${bi},${gi},${ci})">✕</button>
+      </div>`;
+    };
+    const cards = op.protocolBranches.map((b, bi) => {
+      const isDefault = bi === op.protocolBranches.length - 1;
+      let condHtml = '';
+      if (!isDefault) {
+        const groups = b.conditionGroups || [];
+        const groupsHtml = groups.map((group, gi) => {
+          const rows = group.map((c, ci) => buildCondRow(c, bi, gi, ci)).join('');
+          const orSep = gi > 0 ? `<div class="fb-or-sep"><span>Или</span></div>` : '';
+          return `${orSep}<div class="fb-group">
+            ${rows}
+            <button class="tbl-btn fb-add-cond-btn" onclick="addProtoBranchCondition(${ti},${oi},${bi},${gi})">+ И</button>
+          </div>`;
+        }).join('');
+        condHtml = `<div class="fb-cond-section">
+          ${groupsHtml || `<span class="fb-no-cond">Нет условий</span>`}
+          <button class="tbl-btn fb-add-or-btn" onclick="addProtoBranchOrGroup(${ti},${oi},${bi})">+ Или</button>
+        </div>`;
+      }
+      const protoLines = renderProtoBranchLines(ti, oi, bi, b.protocol);
+      return `<div class="fb-card${isDefault?' fb-card-default':''}">
+        <div class="fb-card-header">
+          <span class="fb-card-title">${isDefault ? 'По умолчанию' : `Вариант ${bi+1}`}</span>
+          ${isDefault ? '' : `<button class="tbl-btn del-btn" onclick="removeProtocolBranch(${ti},${oi},${bi})">✕</button>`}
+        </div>
+        ${condHtml}
+        <div class="fb-proto-wrap">
+          ${protoLines}
+          <div class="fb-proto-actions">
+            <button class="tbl-btn" onclick="addProtoBranchLine(${ti},${oi},${bi})">+ Строка</button>
+            <button class="btn-secondary btn-sm" onclick="applyProtoBranchTemplate(${ti},${oi},${bi})">Шаблон</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+    return `<div class="section">
+      <div class="section-title">
+        <span class="stitle">Варианты протокола</span>
+        <button class="btn-secondary btn-sm" onclick="addProtocolBranch(${ti},${oi})">+ Вариант</button>
+        <button class="btn-secondary btn-sm" onclick="convertToSimpleProtocol(${ti},${oi})">↩ Убрать варианты</button>
+      </div>
+      <div class="section-body">
+        <div class="fb-cards">${cards}</div>
+      </div>
+    </div>`;
+  }
+
   return `<div class="section">
     <div class="section-title">
       <span class="stitle">Протокол <span class="tag">${op.protocol.length}</span></span>
       <button class="btn-secondary btn-sm" onclick="applyProtocolTemplate(${ti},${oi})">Шаблон</button>
+      <button class="btn-secondary btn-sm" onclick="addProtocolBranch(${ti},${oi})">+ Условие</button>
       <button class="btn-primary btn-sm" onclick="addProtocolLine(${ti},${oi})">+ Строка</button>
     </div>
     <div class="section-body">
       ${renderProtocolLines(ti, oi, op.protocol)}
     </div>
   </div>`;
+}
+
+function renderProtoBranchLines(ti, oi, bi, lines) {
+  if (lines.length === 0) return '<div style="color:#bbb;font-size:12px;margin-bottom:4px">Нет строк</div>';
+  return `<div class="proto-lines">${lines.map((line, li) =>
+    `<div class="proto-line-row" draggable="true"
+      ondragstart="protoBranchDragStart(event,${ti},${oi},${bi},${li})"
+      ondragover="protoBranchDragOver(event,${li})"
+      ondragleave="protoBranchDragLeave(event)"
+      ondrop="protoBranchDrop(event,${ti},${oi},${bi},${li})"
+      ondragend="protoBranchDragEnd(event)">
+      <span class="param-grip" onmousedown="protoBranchGripMouseDown()">⠿</span>
+      <input type="text" id="fld-pbp-${bi}-${li}" value="${esc(line)}"
+        ondragstart="event.stopPropagation()"
+        oninput="updateProtoBranchLine(${ti},${oi},${bi},${li},this.value)"
+        placeholder="Пустая строка">
+      <button class="tbl-btn del-btn" onclick="deleteProtoBranchLine(${ti},${oi},${bi},${li})">✕</button>
+    </div>`
+  ).join('')}</div>`;
 }
 
 function renderProtocolLines(ti, oi, lines) {
@@ -410,11 +662,11 @@ function renderParamsTable(scope, ti, oi, params, dupCodes) {
       ondrop="paramDrop(event,'${scope}',${ti},${oi},${pi})"
       ondragend="paramDragEnd(event)">
       <td class="col-ctl"><span class="param-grip" title="Перетащить" onmousedown="paramGripMouseDown()">⠿</span></td>
-      <td><input type="text" value="${esc(p.name)}" oninput="updateParam('${scope}',${ti},${oi},${pi},'name',this.value)" placeholder="Название"></td>
+      <td><input id="fld-pn-${pi}" type="text" value="${esc(p.name)}" oninput="updateParam('${scope}',${ti},${oi},${pi},'name',this.value)" placeholder="Название"></td>
       <td><input id="fld-p-${pi}" type="text" maxlength="10" value="${esc(p.code)}" oninput="updateParam('${scope}',${ti},${oi},${pi},'code',this.value)" placeholder="Код" class="${isErr ? 'err' : ''}"></td>
       <td>
         <select onchange="updateParamType('${scope}',${ti},${oi},${pi},this.value)">
-          ${['List','String','Integer','Float','Date','Boolean'].map(t =>
+          ${['List','CoefList','String','Integer','Float','Date','Boolean'].map(t =>
             `<option value="${t}"${p.type===t?' selected':''}>${t}</option>`
           ).join('')}
         </select>
@@ -579,6 +831,36 @@ function renderDefaultCell(scope, ti, oi, pi, p) {
       const key = `${scope}-${ti}-${oi}-${pi}`;
       const items = (p.defaultVal || '').split(';').filter(s => s.length > 0);
       return `<div class="list-editor"><div id="lt-${key}" class="list-tags">${buildListChips(scope,ti,oi,pi,items)}</div><input class="list-add-input" type="text" placeholder="Новый вариант + Enter" onkeydown="if(event.key==='Enter'){addListItem('${scope}',${ti},${oi},${pi},this);event.preventDefault()}"></div>`;
+    }
+    case 'CoefList': {
+      const key = `${scope}-${ti}-${oi}-${pi}`;
+      const items = p.items || [];
+      const rows = items.map((it, ii) =>
+        `<div class="coef-item-row" draggable="true"
+           ondragstart="coefItemDragStart(event,'${scope}',${ti},${oi},${pi},${ii})"
+           ondragover="coefItemDragOver(event,${ii})"
+           ondragleave="coefItemDragLeave(event)"
+           ondragend="coefItemDragEnd(event)"
+           ondrop="coefItemDrop(event,'${scope}',${ti},${oi},${pi},${ii})">
+          <span class="param-grip" onmousedown="coefItemGripMouseDown()">⠿</span>
+          <input type="text" class="coef-label-inp" value="${esc(it.label)}" placeholder="Описание"
+            ondragstart="event.stopPropagation()"
+            oninput="updateCoefItem('${scope}',${ti},${oi},${pi},${ii},'label',this.value)">
+          <input type="number" step="0.1" class="coef-val-inp" value="${it.value}"
+            ondragstart="event.stopPropagation()"
+            oninput="updateCoefItem('${scope}',${ti},${oi},${pi},${ii},'value',parseFloat(this.value)||1)">
+          <button class="tbl-btn del-btn" onclick="deleteCoefItem('${scope}',${ti},${oi},${pi},${ii})">✕</button>
+        </div>`
+      ).join('');
+      return `<div class="coef-list-editor">
+        <div class="coef-max-row">
+          <span>Макс. выборов:</span>
+          <input type="number" step="1" min="1" max="${items.length || 1}" value="${p.maxSelect || 1}"
+            oninput="updateCoefMaxSelect('${scope}',${ti},${oi},${pi},parseInt(this.value)||1)">
+        </div>
+        <div id="cl-${key}" class="coef-items">${rows}</div>
+        <button class="tbl-btn" style="margin-top:4px" onclick="addCoefItem('${scope}',${ti},${oi},${pi})">+ Добавить</button>
+      </div>`;
     }
     case 'String':  return `<input type="text" value="${esc(p.defaultVal)}" oninput="${upd}this.value)">`;
     case 'Integer': return `<input type="number" step="1" value="${esc(p.defaultVal)||0}" oninput="${upd}this.value)">`;

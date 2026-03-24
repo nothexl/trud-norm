@@ -72,7 +72,21 @@ function generateCode() {
       type.operations.forEach((op, oi) => {
         const lastOp = oi === type.operations.length - 1;
         const sep = lastOp ? ' _' : ', _';
-        out.push(`      Array("${vb(op.name)}", "${vb(op.shts)}", "${vb(op.prof)}", "${vb(op.code)}", _`);
+        const genFieldVB = (val, branches) => {
+          if (!branches || branches.length === 0) return [`        "${vb(val || '')}", _`];
+          const lines = [`        Array( _`];
+          branches.forEach((b, bi) => {
+            const bsep = bi < branches.length - 1 ? ', _' : ' _';
+            const condStr = conditionsToVB(b.conditionGroups, ti, oi);
+            lines.push(`          Array("${vb(condStr)}", "${vb(b.value)}")${bsep}`);
+          });
+          lines.push(`        ), _`);
+          return lines;
+        };
+        out.push(`      Array("${vb(op.name)}", _`);
+        genFieldVB(op.shts, op.shtsBranches).forEach(l => out.push(l));
+        genFieldVB(op.prof, op.profBranches).forEach(l => out.push(l));
+        out.push(`        "${vb(op.code)}", _`);
         if (op.params.length === 0) {
           out.push(`        Array(), _`);
         } else {
@@ -82,8 +96,35 @@ function generateCode() {
           });
           out.push(`        ), _`);
         }
-        out.push(`        "${vb(op.formula || '')}", _`);
-        if (op.protocol.length === 0) {
+        const fb = op.formulaBranches;
+        if (fb && fb.length > 0) {
+          out.push(`        Array( _`);
+          fb.forEach((b, bi) => {
+            const bsep = bi < fb.length - 1 ? ', _' : ' _';
+            const condStr = conditionsToVB(b.conditionGroups, ti, oi);
+            out.push(`          Array("${vb(condStr)}", "${vb(b.formula)}")${bsep}`);
+          });
+          out.push(`        ), _`);
+        } else {
+          out.push(`        "${vb(op.formula || '')}", _`);
+        }
+        if (op.protocolBranches && op.protocolBranches.length > 0) {
+          out.push(`        Array( _`);
+          op.protocolBranches.forEach((b, bi) => {
+            const bsep = bi < op.protocolBranches.length - 1 ? ', _' : ' _';
+            const condStr = conditionsToVB(b.conditionGroups, ti, oi);
+            if (b.protocol.length === 0) {
+              out.push(`          Array("${vb(condStr)}", Array())${bsep}`);
+            } else {
+              out.push(`          Array("${vb(condStr)}", Array( _`);
+              b.protocol.forEach((line, li) => {
+                out.push(`            "${vb(line)}"${li < b.protocol.length - 1 ? ', _' : ' _'}`);
+              });
+              out.push(`          ))${bsep}`);
+            }
+          });
+          out.push(`        ), _`);
+        } else if (op.protocol.length === 0) {
           out.push(`        Array(), _`);
         } else {
           out.push(`        Array( _`);
@@ -112,7 +153,17 @@ function generateCode() {
   document.getElementById('codeOutput').value = out.join('\n');
 }
 
-function paramVB(p) { return `Array("${vb(p.name)}", "${vb(p.code)}", "${p.type}", ${defaultVB(p)})`; }
+function paramVB(p) {
+  if (p.type === 'CoefList') {
+    const itemsVb = (p.items || []).map(it => {
+      const f = parseFloat(it.value); const v = isNaN(f) ? 1 : f;
+      const vs = Number.isInteger(v) ? `${v}.0` : String(v);
+      return `Array("${vb(it.label)}", ${vs})`;
+    }).join(', ');
+    return `Array("${vb(p.name)}", "${vb(p.code)}", "CoefList", Array(${itemsVb}), ${parseInt(p.maxSelect) || 1})`;
+  }
+  return `Array("${vb(p.name)}", "${vb(p.code)}", "${p.type}", ${defaultVB(p)})`;
+}
 function defaultVB(p) {
   switch (p.type) {
     case 'List': case 'String': case 'Date': return `"${vb(p.defaultVal)}"`;
@@ -121,6 +172,28 @@ function defaultVB(p) {
     case 'Boolean': return p.defaultVal === 'True' ? 'True' : 'False';
     default: return `"${vb(p.defaultVal)}"`;
   }
+}
+
+function conditionsToVB(conditionGroups, ti, oi) {
+  if (!conditionGroups || conditionGroups.length === 0) return '';
+  const allParams = [];
+  const type = schema[ti];
+  const op = type && type.operations[oi];
+  if (type) type.paramSets.forEach(ps => ps.params.forEach(p => allParams.push(p)));
+  if (op) op.params.forEach(p => allParams.push(p));
+  const opMap = { '=': '=', '≠': '<>', '<': '<', '>': '>', '≤': '<=', '≥': '>=' };
+  const condStr = c => {
+    const vbOp = opMap[c.op] || '=';
+    const param = allParams.find(p => p.code === c.code);
+    const pType = param ? param.type : 'String';
+    const valStr = ['Integer','Float'].includes(pType) ? (parseFloat(c.value) || 0) : `"${vb(c.value)}"`;
+    return `{p.${c.code}} ${vbOp} ${valStr}`;
+  };
+  const groupStrs = conditionGroups.map(group => {
+    const s = group.map(condStr).join(' And ');
+    return conditionGroups.length > 1 && group.length > 1 ? `(${s})` : s;
+  });
+  return groupStrs.join(' Or ');
 }
 
 function copyCode(btn) {

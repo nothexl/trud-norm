@@ -89,9 +89,14 @@ function renderValidationBanner() {
   // Empty operation codes and parameter codes
   schema.forEach(type => {
     type.operations.forEach(op => {
-      if (!op.code) errors.push(`Тип «${esc(type.name)}», операция «${esc(op.name) || '(без названия)'}»: не указан код`);
+      const opLabel = `Тип «${esc(type.name)}», операция «${esc(op.name) || '(без названия)'}»`;
+      if (!op.name) errors.push(`${opLabel}: не указано название операции`);
+      if (!op.code) errors.push(`${opLabel}: не указан код`);
+      if (!op.shts && !op.shtsBranches) errors.push(`${opLabel}: не указан ШТС`);
+      if (!op.prof && !op.profBranches) errors.push(`${opLabel}: не указан код профессии`);
     });
     const checkParams = (params, context) => params.forEach(p => {
+      if (!p.name) errors.push(`${context}, параметр (код ${esc(p.code) || '?'}): не указано название`);
       if (!p.code) errors.push(`${context}, параметр «${esc(p.name) || '(без названия)'}»: не указан код`);
     });
     type.paramSets.forEach((ps, si) => checkParams(ps.params, `Тип «${esc(type.name)}», набор «${esc(ps.name) || `#${si+1}`}»`));
@@ -131,8 +136,10 @@ function renderValidationBanner() {
     type.operations.forEach((op, oi) => {
       const feKey = `${ti}:${oi}`;
       const _setFE = (field, li) => {
-        if (!_fieldErrors[feKey]) _fieldErrors[feKey] = { formula: false, protocol: new Set() };
+        if (!_fieldErrors[feKey]) _fieldErrors[feKey] = { formula: false, formulaBranches: new Set(), protocol: new Set(), protocolBranches: new Set() };
         if (field === 'formula') _fieldErrors[feKey].formula = true;
+        else if (field === 'formulaBranch') _fieldErrors[feKey].formulaBranches.add(li);
+        else if (field === 'protocolBranch') _fieldErrors[feKey].protocolBranches.add(li);
         else _fieldErrors[feKey].protocol.add(li);
       };
       const opCtx = `Операция «${esc(op.name) || '(без названия)'}» (${esc(op.code || '?')})`;
@@ -149,25 +156,23 @@ function renderValidationBanner() {
         });
       };
       const _fe0 = errors.length;
-      if (op.formula) {
-        checkOp(op.formula, `${opCtx}, формула`, false);
-        const ctx = `${opCtx}, формула`;
-
-        // Check non-numeric param types used in formula
+      const _allFormulas = op.formulaBranches
+        ? op.formulaBranches.map(b => b.formula).filter(Boolean)
+        : (op.formula ? [op.formula] : []);
+      const _checkFormula = (fml, ctx) => {
+        checkOp(fml, ctx, false);
         const paramTypes = new Map();
         type.paramSets.forEach(ps => ps.params.forEach(p => { if (p.code) paramTypes.set(p.code, p.type); }));
         op.params.forEach(p => { if (p.code) paramTypes.set(p.code, p.type); });
-        [...op.formula.matchAll(/\{p\.([^}]+)\}/g)].forEach(m => {
+        [...fml.matchAll(/\{p\.([^}]+)\}/g)].forEach(m => {
           const pType = paramTypes.get(m[1]);
           if (pType === 'String' || pType === 'Date')
             errors.push(`${ctx}: параметр <b>${esc(m[1])}</b> имеет тип ${pType} — текстовые параметры нельзя использовать в формуле`);
         });
-
-        // Syntax check: replace placeholders and known functions, then validate
         const knownFns = /\b(Abs|Atn|Cos|Exp|Fix|Int|Log|Rnd|Sgn|Sin|Sqr|Tan|Round)\s*\(/gi;
-        if (/\}\s*\{/.test(op.formula))
+        if (/\}\s*\{/.test(fml))
           errors.push(`${ctx}: между значениями отсутствует оператор`);
-        const cleaned = op.formula
+        const cleaned = fml
           .replace(/\{[^}]+\}/g, '1')
           .replace(/\bMod\b/gi, '%')
           .replace(knownFns, '(');
@@ -193,12 +198,75 @@ function renderValidationBanner() {
           }
           if (depth !== 0) errors.push(`${ctx}: несбалансированные скобки`);
         }
+      };
+      if (op.formulaBranches) {
+        op.formulaBranches.forEach((b, bi) => {
+          const isDefault = bi === op.formulaBranches.length - 1;
+          const ctx = `${opCtx}, вариант ${bi + 1}`;
+          if (!isDefault) {
+            const groups = b.conditionGroups || [];
+            if (groups.length === 0 || groups.every(g => g.length === 0))
+              errors.push(`${ctx}: не задано ни одного условия`);
+            groups.forEach((group, gi) => group.forEach((c, ci) => {
+              if (!c.code) errors.push(`${ctx}, группа ${gi+1}, условие ${ci+1}: не выбран параметр`);
+              if (c.value === '' || c.value === undefined) errors.push(`${ctx}, группа ${gi+1}, условие ${ci+1}: не задано значение`);
+            }));
+          }
+          const _bfFml0 = errors.length;
+          if (!b.formula) errors.push(`${ctx}: формула не задана`);
+          else _checkFormula(b.formula, `${ctx}, формула`);
+          if (errors.length > _bfFml0) _setFE('formulaBranch', bi);
+        });
+      } else if (op.formula) {
+        _checkFormula(op.formula, `${opCtx}, формула`);
+        if (errors.length > _fe0) _setFE('formula');
       }
-      if (errors.length > _fe0) _setFE('formula');
-      op.protocol.forEach((line, li) => {
-        const _fp0 = errors.length;
-        if (line) checkOp(line, `${opCtx}, протокол стр.${li+1}`, true);
-        if (errors.length > _fp0) _setFE('protocol', li);
+      if (op.protocolBranches) {
+        op.protocolBranches.forEach((b, bi) => {
+          const isDefault = bi === op.protocolBranches.length - 1;
+          const ctx = `${opCtx}, протокол вариант ${bi + 1}`;
+          if (!isDefault) {
+            const groups = b.conditionGroups || [];
+            if (groups.length === 0 || groups.every(g => g.length === 0))
+              errors.push(`${ctx}: не задано ни одного условия`);
+            groups.forEach((group, gi) => group.forEach((c, ci) => {
+              if (!c.code) errors.push(`${ctx}, условие ${gi+1}.${ci+1}: не выбран параметр`);
+              if (c.value === '' || c.value === undefined) errors.push(`${ctx}, условие ${gi+1}.${ci+1}: не задано значение`);
+            }));
+          }
+          b.protocol.forEach((line, li) => {
+            const _fp0 = errors.length;
+            if (line) checkOp(line, `${ctx}, стр.${li+1}`, true);
+            if (errors.length > _fp0) _setFE('protocolBranch', `${bi}:${li}`);
+          });
+        });
+      } else {
+        op.protocol.forEach((line, li) => {
+          const _fp0 = errors.length;
+          if (line) checkOp(line, `${opCtx}, протокол стр.${li+1}`, true);
+          if (errors.length > _fp0) _setFE('protocol', li);
+        });
+      }
+
+      ['shts', 'prof'].forEach(field => {
+        const branches = op[field + 'Branches'];
+        const fieldLabel = field === 'shts' ? 'ШТС' : 'Код профессии';
+        if (branches) {
+          branches.forEach((b, bi) => {
+            const isDefault = bi === branches.length - 1;
+            const ctx = `${opCtx}, ${fieldLabel} вариант ${bi + 1}`;
+            if (!isDefault) {
+              const groups = b.conditionGroups || [];
+              if (groups.length === 0 || groups.every(g => g.length === 0))
+                errors.push(`${ctx}: не задано ни одного условия`);
+              groups.forEach((group, gi) => group.forEach((c, ci) => {
+                if (!c.code) errors.push(`${ctx}, условие ${gi+1}.${ci+1}: не выбран параметр`);
+                if (c.value === '' || c.value === undefined) errors.push(`${ctx}, условие ${gi+1}.${ci+1}: не задано значение`);
+              }));
+            }
+            if (!b.value) errors.push(`${ctx}: не задано значение`);
+          });
+        }
       });
     });
 
@@ -251,22 +319,63 @@ function refreshEditorErrors() {
   if (sel.kind === 'op') {
     const op = schema[sel.ti].operations[sel.oi];
     const dupOps = getGlobalDupOpCodes();
+    const nameInp = document.getElementById('fld-op-name');
+    if (nameInp) nameInp.classList.toggle('err', !op.name);
     const inp = document.getElementById('fld-op-code');
     if (inp) inp.classList.toggle('err', !op.code || dupOps.has(op.code));
     const dups = getDupCodes(op.params);
     op.params.forEach((p, pi) => {
+      const ni = document.getElementById(`fld-pn-${pi}`);
+      if (ni) ni.classList.toggle('err', !p.name);
       const i = document.getElementById(`fld-p-${pi}`);
       if (i) i.classList.toggle('err', !p.code || dups.has(p.code));
+    });
+    ['shts', 'prof'].forEach(field => {
+      const branches = op[field + 'Branches'];
+      if (branches) {
+        branches.forEach((b, bi) => {
+          const vi = document.getElementById(`fld-fv-${field}-${bi}`);
+          if (vi) vi.classList.toggle('err', !b.value);
+          (b.conditionGroups || []).forEach((group, gi) => group.forEach((c, ci) => {
+            const el = document.getElementById(`fld-fc-${field}-${bi}-${gi}-${ci}`);
+            if (el) el.classList.toggle('err', c.value === '' || c.value === undefined);
+          }));
+        });
+      } else {
+        const si = document.getElementById(`fld-op-${field}`);
+        if (si) si.classList.toggle('err', !op[field]);
+      }
     });
     const tag = document.getElementById('tag-params');
     if (tag) { tag.textContent = op.params.length; tag.classList.toggle('err', dups.size > 0); }
     const fe = _fieldErrors[`${sel.ti}:${sel.oi}`];
     const fldFormula = document.getElementById('fld-formula');
     if (fldFormula) fldFormula.classList.toggle('err', !!(fe && fe.formula));
-    op.protocol.forEach((_, li) => {
-      const inp = document.getElementById(`fld-proto-${li}`);
-      if (inp) inp.classList.toggle('err', !!(fe && fe.protocol && fe.protocol.has(li)));
+    op.formulaBranches && op.formulaBranches.forEach((b, bi) => {
+      const ta = document.getElementById(`fld-fbf-${bi}`);
+      if (ta) ta.classList.toggle('err', !!(fe && fe.formulaBranches && fe.formulaBranches.has(bi)));
+      (b.conditionGroups || []).forEach((group, gi) => group.forEach((c, ci) => {
+        const el = document.getElementById(`fld-cv-${bi}-${gi}-${ci}`);
+        if (el) el.classList.toggle('err', c.value === '' || c.value === undefined);
+      }));
     });
+    if (op.protocolBranches) {
+      op.protocolBranches.forEach((b, bi) => {
+        b.protocol.forEach((_, li) => {
+          const inp = document.getElementById(`fld-pbp-${bi}-${li}`);
+          if (inp) inp.classList.toggle('err', !!(fe && fe.protocolBranches && fe.protocolBranches.has(`${bi}:${li}`)));
+        });
+        (b.conditionGroups || []).forEach((group, gi) => group.forEach((c, ci) => {
+          const el = document.getElementById(`fld-pbc-${bi}-${gi}-${ci}`);
+          if (el) el.classList.toggle('err', c.value === '' || c.value === undefined);
+        }));
+      });
+    } else {
+      op.protocol.forEach((_, li) => {
+        const inp = document.getElementById(`fld-proto-${li}`);
+        if (inp) inp.classList.toggle('err', !!(fe && fe.protocol && fe.protocol.has(li)));
+      });
+    }
   } else if (sel.kind === 'type' && sel.si === undefined) {
     const dupNames = getDupTypeNames();
     const nameInp = document.getElementById('fld-type-name');

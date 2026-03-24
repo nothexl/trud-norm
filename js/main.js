@@ -121,7 +121,7 @@ function addParam(scope, ti, oi) {
   const used = new Set(params.map(p => p.code));
   let n = 1;
   while (used.has('OP_' + n)) n++;
-  params.push({ name: '', code: 'OP_' + n, type: 'Integer', defaultVal: '0' });
+  params.push({ name: 'Параметр ' + n, code: 'OP_' + n, type: 'Integer', defaultVal: '0' });
   renderEditor(); scheduleGen(true);
 }
 function deleteParam(scope, ti, oi, pi) {
@@ -132,9 +132,42 @@ function deleteParam(scope, ti, oi, pi) {
 function updateParamType(scope, ti, oi, pi, val) {
   const p = getParams(scope, ti, oi)[pi];
   p.type = val;
-  const defs = { List:'', String:'', Integer:'0', Float:'0.0', Date:'', Boolean:'False' };
-  p.defaultVal = defs[val] || '';
+  if (val === 'CoefList') {
+    p.items = p.items || [];
+    p.maxSelect = p.maxSelect || 1;
+    delete p.defaultVal;
+  } else {
+    const defs = { List:'', String:'', Integer:'0', Float:'0.0', Date:'', Boolean:'False' };
+    p.defaultVal = defs[val] || '';
+    delete p.items;
+    delete p.maxSelect;
+  }
   renderEditor(); scheduleGen(true);
+}
+
+function addCoefItem(scope, ti, oi, pi) {
+  const p = getParams(scope, ti, oi)[pi];
+  if (!p.items) p.items = [];
+  p.items.push({ label: '', value: 1 });
+  renderEditor(); scheduleGen(true);
+}
+
+function deleteCoefItem(scope, ti, oi, pi, ii) {
+  const p = getParams(scope, ti, oi)[pi];
+  p.items.splice(ii, 1);
+  p.maxSelect = Math.min(p.maxSelect || 1, p.items.length || 1);
+  renderEditor(); scheduleGen(true);
+}
+
+function updateCoefItem(scope, ti, oi, pi, ii, field, val) {
+  getParams(scope, ti, oi)[pi].items[ii][field] = val;
+  scheduleGen(false);
+}
+
+function updateCoefMaxSelect(scope, ti, oi, pi, val) {
+  const p = getParams(scope, ti, oi)[pi];
+  p.maxSelect = Math.min(Math.max(1, val), p.items.length || 1);
+  scheduleGen(false);
 }
 
 function updateTypeName(ti, val) {
@@ -148,9 +181,96 @@ function updateOpFormula(ti, oi, val) {
   scheduleGen(false);
 }
 
+function getAllOpParams(ti, oi) {
+  const type = schema[ti], op = type.operations[oi];
+  const params = [], seen = new Set();
+  const add = p => { if (p.code && !seen.has(p.code) && p.type !== 'CoefList') { seen.add(p.code); params.push(p); } };
+  type.paramSets.forEach(ps => ps.params.forEach(add));
+  op.params.forEach(add);
+  return params;
+}
+
+function _newCondition(ti, oi) {
+  const params = getAllOpParams(ti, oi);
+  const p = params.length > 0 ? params[0] : null;
+  const code = p ? p.code : '';
+  let value = '';
+  if (p && p.type === 'List') { const v = (p.defaultVal||'').split(';').filter(Boolean); value = v[0] || ''; }
+  else if (p && p.type === 'Boolean') value = 'True';
+  return { code, op: '=', value };
+}
+
+function addFormulaBranch(ti, oi) {
+  const op = schema[ti].operations[oi];
+  const newBranch = { conditionGroups: [[_newCondition(ti, oi)]], formula: '' };
+  if (!op.formulaBranches) {
+    op.formulaBranches = [newBranch, { conditionGroups: [], formula: op.formula || '' }];
+    op.formula = '';
+  } else {
+    op.formulaBranches.splice(op.formulaBranches.length - 1, 0, newBranch);
+  }
+  renderEditor(); scheduleGen(true);
+}
+
+function removeFormulaBranch(ti, oi, bi) {
+  const op = schema[ti].operations[oi];
+  op.formulaBranches.splice(bi, 1);
+  if (op.formulaBranches.length === 1 && op.formulaBranches[0].conditionGroups.length === 0) {
+    op.formula = op.formulaBranches[0].formula;
+    op.formulaBranches = undefined;
+  }
+  renderEditor(); scheduleGen(true);
+}
+
+function addBranchCondition(ti, oi, bi, gi) {
+  schema[ti].operations[oi].formulaBranches[bi].conditionGroups[gi].push(_newCondition(ti, oi));
+  renderEditor(); scheduleGen(true);
+}
+
+function removeBranchCondition(ti, oi, bi, gi, ci) {
+  const groups = schema[ti].operations[oi].formulaBranches[bi].conditionGroups;
+  groups[gi].splice(ci, 1);
+  if (groups[gi].length === 0) groups.splice(gi, 1);
+  renderEditor(); scheduleGen(true);
+}
+
+function addBranchOrGroup(ti, oi, bi) {
+  schema[ti].operations[oi].formulaBranches[bi].conditionGroups.push([_newCondition(ti, oi)]);
+  renderEditor(); scheduleGen(true);
+}
+
+function updateBranchCondField(ti, oi, bi, gi, ci, field, val) {
+  const c = schema[ti].operations[oi].formulaBranches[bi].conditionGroups[gi][ci];
+  c[field] = val;
+  if (field === 'code') {
+    const params = getAllOpParams(ti, oi);
+    const p = params.find(p => p.code === val);
+    if (p && p.type === 'List') { const v = (p.defaultVal||'').split(';').filter(Boolean); c.value = v[0] || ''; }
+    else if (p && p.type === 'Boolean') c.value = 'True';
+    else c.value = '';
+    if (p && !['Integer','Float'].includes(p.type) && ['<','>','≤','≥'].includes(c.op)) c.op = '=';
+    renderEditor(); scheduleGen(true);
+  } else {
+    scheduleGen(false);
+  }
+}
+
+function updateBranchFormula(ti, oi, bi, val) {
+  schema[ti].operations[oi].formulaBranches[bi].formula = val;
+  scheduleGen(false);
+}
+
+function convertToSimpleFormula(ti, oi) {
+  const op = schema[ti].operations[oi];
+  const def = op.formulaBranches[op.formulaBranches.length - 1];
+  op.formula = def ? def.formula : '';
+  op.formulaBranches = undefined;
+  renderEditor(); scheduleGen(true);
+}
+
 function insertFnAtActive(fn) {
-  const el = document.getElementById('fld-formula');
-  if (!el) return;
+  const el = document.activeElement;
+  if (!el || el.tagName !== 'TEXTAREA') return;
   const s = el.selectionStart, e = el.selectionEnd;
   const selected = el.value.slice(s, e);
   let insert, cursor;
@@ -203,8 +323,7 @@ function evalSubFormula(formula, idPrefix) {
     const safeId = idPrefix + ph.replace(/[^a-zA-Z0-9]/g, '_');
     if (ph.startsWith('p.')) {
       // Always read from top-level shared param input (not sub-prefixed)
-      const el = document.getElementById('ft_' + ph.replace(/[^a-zA-Z0-9]/g, '_'));
-      values[ph] = el ? el.value : '0';
+      values[ph] = readFtParamValue('ft_' + ph.replace(/[^a-zA-Z0-9]/g, '_'));
       return;
     }
     if (ph.startsWith('K.')) {
@@ -212,13 +331,13 @@ function evalSubFormula(formula, idPrefix) {
       const tbl = coefTables.find(t => t.code === tableCode);
       if (!tbl || tbl.keys.length === 0) {
         const el = document.getElementById(safeId);
-        values[ph] = el ? el.value : '0';
+        values[ph] = el ? (el.value.trim() || '0') : '0';
       } else {
         const keyValues = tbl.keys.map((key, ki) => {
           const paramEl = document.getElementById('ft_p_' + key.replace(/[^a-zA-Z0-9]/g, '_'));
-          if (paramEl) return paramEl.value;
+          if (paramEl) return paramEl.value.trim() || '0';
           const kEl = document.getElementById(`${safeId}_k${ki}`);
-          return kEl ? kEl.value : '0';
+          return kEl ? (kEl.value.trim() || '0') : '0';
         });
         const found = lookupCoefTable(tableCode, keyValues);
         if (found === null || found === undefined || found === '') {
@@ -231,7 +350,7 @@ function evalSubFormula(formula, idPrefix) {
       return;
     }
     const el = document.getElementById(safeId);
-    values[ph] = el ? el.value : '0';
+    values[ph] = el ? (el.value.trim() || '0') : '0';
   });
   if (errors.length > 0) return { value: null, error: errors.join('; ') };
   let display = formula;
@@ -249,10 +368,20 @@ function evalSubFormula(formula, idPrefix) {
       .replace(/\\/g, '/');
     const result = new Function('return ' + expr)();
     if (typeof result !== 'number' || !isFinite(result)) throw new Error('Результат не является числом');
-    return { value: result };
+    return { value: result, display };
   } catch(e) {
     return { value: null, error: e.message };
   }
+}
+
+function readFtParamValue(elId) {
+  const el = document.getElementById(elId);
+  if (!el) return '0';
+  if (el.dataset && el.dataset.type === 'coeflist') {
+    const checked = [...el.querySelectorAll('input[type=checkbox]:checked')];
+    return checked.length > 0 ? String(checked.reduce((acc, cb) => acc * (parseFloat(cb.value) || 1), 1)) : '1';
+  }
+  return el.value.trim() || '0';
 }
 
 function VbsRound(x, n) {
@@ -260,45 +389,89 @@ function VbsRound(x, n) {
   return Math.round(x * f) / f;
 }
 
+function ftCoefListChange(cb, maxSelect) {
+  const container = cb.closest('[data-type="coeflist"]');
+  const checked = [...container.querySelectorAll('input[type=checkbox]:checked')];
+  if (checked.length > maxSelect) cb.checked = false;
+}
+
 function openFormulaTest(ti, oi) {
   const type = schema[ti];
   const op = type.operations[oi];
-  const formula = op.formula.trim();
-  if (!formula) { alert('Формула пуста'); return; }
+  const isBranched = !!(op.formulaBranches && op.formulaBranches.length > 0);
   const fe = _fieldErrors[`${ti}:${oi}`];
-  if (fe && fe.formula) { alert('Исправьте ошибки в формуле перед проверкой.'); return; }
-  _ftCtx = { ti, oi };
 
-  const paramTypes = new Map(), paramDefaults = new Map();
-  type.paramSets.forEach(ps => ps.params.forEach(p => {
-    if (p.code) { paramTypes.set(p.code, p.type); paramDefaults.set(p.code, p.defaultVal || '0'); }
-  }));
-  op.params.forEach(p => {
-    if (p.code) { paramTypes.set(p.code, p.type); paramDefaults.set(p.code, p.defaultVal || '0'); }
-  });
-  // Merge params from all sub-ops referenced in this formula
-  [...formula.matchAll(/\{op\.([^}]+)\}/g)].forEach(m => {
-    const refOp = type.operations.find(o => o.code === m[1]);
-    if (refOp) refOp.params.forEach(p => { if (p.code && !paramTypes.has(p.code)) { paramTypes.set(p.code, p.type); paramDefaults.set(p.code, p.defaultVal || '0'); } });
-  });
+  if (isBranched) {
+    if (fe && fe.formulaBranches && fe.formulaBranches.size > 0)
+      { alert('Исправьте ошибки в вариантах формулы перед проверкой.'); return; }
+  } else {
+    const formula = (op.formula || '').trim();
+    if (!formula) { alert('Формула пуста'); return; }
+    if (fe && fe.formula) { alert('Исправьте ошибки в формуле перед проверкой.'); return; }
+  }
 
-  const seen = new Set();
-  const phs = [];
-  [...formula.matchAll(/\{([^}]+)\}/g)].forEach(m => { if (!seen.has(m[1])) { seen.add(m[1]); phs.push(m[1]); } });
+  const paramTypes = new Map(), paramDefaults = new Map(), paramCoefMeta = new Map();
+  const registerParam = p => {
+    if (!p.code) return;
+    paramTypes.set(p.code, p.type);
+    paramDefaults.set(p.code, p.defaultVal || '0');
+    if (p.type === 'CoefList') paramCoefMeta.set(p.code, { items: p.items || [], maxSelect: p.maxSelect || 1 });
+  };
+  type.paramSets.forEach(ps => ps.params.forEach(registerParam));
+  op.params.forEach(registerParam);
 
-  // Collect ALL {p.} codes from main formula + all referenced sub-op formulas (deduplicated, main-first)
+  _ftCtx = { ti, oi, isBranched, paramTypes };
+
+  // Collect all formulas to scan for placeholders
+  let formulasToScan = [];
+  if (isBranched) {
+    op.formulaBranches.forEach(b => { if (b.formula) formulasToScan.push(b.formula); });
+  } else {
+    formulasToScan = [op.formula];
+    [...op.formula.matchAll(/\{op\.([^}]+)\}/g)].forEach(m => {
+      const refOp = type.operations.find(o => o.code === m[1]);
+      if (refOp) refOp.params.forEach(p => { if (p.code && !paramTypes.has(p.code)) { paramTypes.set(p.code, p.type); paramDefaults.set(p.code, p.defaultVal || '0'); } });
+      if (refOp && refOp.formula.trim()) formulasToScan.push(refOp.formula);
+    });
+  }
+
+  // Collect all {p.*} codes: from formulas + condition codes (branched)
   const allParamSeen = new Set(), allParamCodes = [];
-  phs.forEach(ph => { if (ph.startsWith('p.') && !allParamSeen.has(ph.slice(2))) { allParamSeen.add(ph.slice(2)); allParamCodes.push(ph.slice(2)); } });
-  phs.filter(ph => ph.startsWith('op.')).forEach(ph => {
-    const refOp = type.operations.find(o => o.code === ph.slice(3));
-    if (refOp && refOp.formula.trim())
-      [...refOp.formula.matchAll(/\{p\.([^}]+)\}/g)].forEach(m => { if (!allParamSeen.has(m[1])) { allParamSeen.add(m[1]); allParamCodes.push(m[1]); } });
-  });
+  const addParamCode = code => { if (code && !allParamSeen.has(code)) { allParamSeen.add(code); allParamCodes.push(code); } };
+  formulasToScan.forEach(f => [...f.matchAll(/\{p\.([^}]+)\}/g)].forEach(m => addParamCode(m[1])));
+  // For sub-op {p.*} in non-branched mode
+  if (!isBranched) {
+    [...op.formula.matchAll(/\{op\.([^}]+)\}/g)].forEach(m => {
+      const refOp = type.operations.find(o => o.code === m[1]);
+      if (refOp && refOp.formula.trim())
+        [...refOp.formula.matchAll(/\{p\.([^}]+)\}/g)].forEach(mm => addParamCode(mm[1]));
+    });
+  }
+  // Condition codes
+  if (isBranched) {
+    op.formulaBranches.forEach(b =>
+      (b.conditionGroups || []).forEach(g => g.forEach(c => addParamCode(c.code)))
+    );
+  }
 
-  // Shared param rows (shown once at top)
+  // All unique non-param placeholders (union across all formulas)
+  const phSeen = new Set(), phs = [];
+  formulasToScan.forEach(f => [...f.matchAll(/\{([^}]+)\}/g)].forEach(m => {
+    if (!m[1].startsWith('p.') && !phSeen.has(m[1])) { phSeen.add(m[1]); phs.push(m[1]); }
+  }));
+
+  // Shared param rows
   const paramRows = allParamCodes.map(code => {
     const sid = 'ft_p_' + code.replace(/[^a-zA-Z0-9]/g, '_');
-    return `<div class="ft-row"><label class="ft-label">{p.${esc(code)}}</label>${makeParamInput(sid, paramTypes.get(code) || 'Float', paramDefaults.get(code) || '0')}</div>`;
+    const pType = paramTypes.get(code) || 'Float';
+    if (pType === 'CoefList') {
+      const meta = paramCoefMeta.get(code) || { items: [], maxSelect: 1 };
+      const boxes = meta.items.map(it =>
+        `<label class="ft-coef-item"><input type="checkbox" value="${parseFloat(it.value) || 1}" onchange="ftCoefListChange(this,${meta.maxSelect})"> ${esc(it.label)} (×${it.value})</label>`
+      ).join('');
+      return `<div class="ft-row ft-row-coeflist"><label class="ft-label">{p.${esc(code)}}</label><div class="ft-coeflist" id="${sid}" data-type="coeflist"><div class="ft-coef-items">${boxes}</div><div class="ft-coef-hint">макс. выборов: ${meta.maxSelect}</div></div></div>`;
+    }
+    return `<div class="ft-row"><label class="ft-label">{p.${esc(code)}}</label>${makeParamInput(sid, pType, paramDefaults.get(code) || '0')}</div>`;
   }).join('');
 
   const makeKeyInput = (tbl, safeId) => tbl.keys.map((key, ki) => {
@@ -307,41 +480,34 @@ function openFormulaTest(ti, oi) {
     return `<div class="ft-key-row"><span class="ft-key-name">${esc(key)}</span>${makeParamInput(`${safeId}_k${ki}`, paramTypes.get(key) || 'Float', paramDefaults.get(key) || '0')}</div>`;
   }).join('');
 
-  // Non-param rows (K. and op.) — sub-op sections skip {p.} since they're shown above
-  const otherRows = phs.filter(ph => !ph.startsWith('p.')).map(ph => {
+  const otherRows = phs.map(ph => {
     const safeId = 'ft_' + ph.replace(/[^a-zA-Z0-9]/g, '_');
     if (ph.startsWith('K.')) {
       const tbl = coefTables.find(t => t.code === ph.slice(2));
-      if (!tbl || tbl.keys.length === 0) {
+      if (!tbl || tbl.keys.length === 0)
         return `<div class="ft-row"><label class="ft-label">{${esc(ph)}}</label><input type="number" step="any" id="${safeId}" class="ft-input" value="1"></div>`;
-      }
-      const keyInputs = makeKeyInput(tbl, safeId);
       return `<div class="ft-row ft-row-table">
         <label class="ft-label">{${esc(ph)}}</label>
         <div class="ft-table-inputs">
           <div class="ft-table-title">${esc(tbl.name || tbl.code)}</div>
-          ${keyInputs}
+          ${makeKeyInput(tbl, safeId)}
         </div>
       </div>`;
     }
     if (ph.startsWith('op.')) {
       const opCode = ph.slice(3);
       const refOp = type.operations.find(o => o.code === opCode);
-      if (!refOp || !refOp.formula.trim()) {
+      if (!refOp || !refOp.formula.trim())
         return `<div class="ft-row"><label class="ft-label">{${esc(ph)}}</label><input type="number" step="any" id="${safeId}" class="ft-input" value="1" placeholder="результат операции"></div>`;
-      }
       const subSeen = new Set(), subPhs = [];
       [...refOp.formula.matchAll(/\{([^}]+)\}/g)].forEach(m => { if (!subSeen.has(m[1])) { subSeen.add(m[1]); subPhs.push(m[1]); } });
-      // Only K. items — {p.} are already shown above
       const subInputs = subPhs.filter(sp => !sp.startsWith('p.')).map(subPh => {
         const subId = `${safeId}_${subPh.replace(/[^a-zA-Z0-9]/g, '_')}`;
         if (subPh.startsWith('K.')) {
           const subTbl = coefTables.find(t => t.code === subPh.slice(2));
-          if (!subTbl || subTbl.keys.length === 0) {
+          if (!subTbl || subTbl.keys.length === 0)
             return `<div class="ft-key-row"><span class="ft-key-name">{${esc(subPh)}}</span><input type="number" step="any" id="${subId}" class="ft-input" value="1"></div>`;
-          }
-          const kInputs = makeKeyInput(subTbl, subId);
-          return `<div class="ft-key-row ft-key-row-nested"><span class="ft-key-name">{${esc(subPh)}}</span><div class="ft-table-inputs">${kInputs}</div></div>`;
+          return `<div class="ft-key-row ft-key-row-nested"><span class="ft-key-name">{${esc(subPh)}}</span><div class="ft-table-inputs">${makeKeyInput(subTbl, subId)}</div></div>`;
         }
         return '';
       }).filter(Boolean).join('');
@@ -357,6 +523,10 @@ function openFormulaTest(ti, oi) {
   }).filter(Boolean).join('');
 
   const rows = paramRows + otherRows;
+  const branchCount = isBranched ? op.formulaBranches.length - 1 : 0;
+  const formulaBox = isBranched
+    ? `<div class="ft-formula-box">${branchCount} вариант(ов) + по умолчанию — введите параметры и нажмите «Рассчитать»</div>`
+    : `<div class="ft-formula-box">${esc(op.formula)}</div>`;
 
   const overlay = document.createElement('div');
   overlay.id = 'ft-overlay';
@@ -365,19 +535,21 @@ function openFormulaTest(ti, oi) {
   overlay.innerHTML = `
     <div class="ft-modal">
       <div class="ft-header">
-        <span class="ft-title">Проверка формулы</span>
+        <span class="ft-title">${isBranched ? 'Проверка вариантов формулы' : 'Проверка формулы'}</span>
         <button class="ft-close-btn" onclick="closeFormulaTest()">✕</button>
       </div>
-      <div class="ft-formula-box">${esc(formula)}</div>
-      <div class="ft-fields">${rows || '<div class="ft-empty">Нет параметров в формуле</div>'}</div>
-      <div class="ft-actions"><button class="btn-primary" onclick="runFormulaTest()">Рассчитать</button></div>
+      ${formulaBox}
+      <div class="ft-fields">${rows || '<div class="ft-empty">Нет параметров</div>'}</div>
       <div id="ft-result"></div>
     </div>`;
   document.body.appendChild(overlay);
 
+  overlay.addEventListener('input', () => runFormulaTest());
+  overlay.addEventListener('change', () => runFormulaTest());
   overlay.addEventListener('keydown', e => { if (e.key === 'Escape') closeFormulaTest(); });
   overlay.setAttribute('tabindex', '-1');
   overlay.focus();
+  runFormulaTest();
 }
 
 function closeFormulaTest() {
@@ -411,10 +583,7 @@ function lookupCoefTable(tableCode, keyValues) {
   return null;
 }
 
-function runFormulaTest() {
-  if (!_ftCtx) return;
-  const formula = schema[_ftCtx.ti].operations[_ftCtx.oi].formula;
-
+function evalMainFormula(formula, ti) {
   const values = {};
   const errors = [];
   [...formula.matchAll(/\{([^}]+)\}/g)].forEach(m => {
@@ -426,13 +595,13 @@ function runFormulaTest() {
       const tbl = coefTables.find(t => t.code === tableCode);
       if (!tbl || tbl.keys.length === 0) {
         const el = document.getElementById(safeId);
-        values[ph] = el ? el.value : '0';
+        values[ph] = el ? (el.value.trim() || '0') : '0';
       } else {
         const keyValues = tbl.keys.map((key, ki) => {
           const paramEl = document.getElementById('ft_p_' + key.replace(/[^a-zA-Z0-9]/g, '_'));
-          if (paramEl) return paramEl.value;
+          if (paramEl) return paramEl.value.trim() || '0';
           const kid = document.getElementById(`${safeId}_k${ki}`);
-          return kid ? kid.value : '0';
+          return kid ? (kid.value.trim() || '0') : '0';
         });
         const found = lookupCoefTable(tableCode, keyValues);
         if (found === null || found === undefined || found === '') {
@@ -446,7 +615,7 @@ function runFormulaTest() {
     }
     if (ph.startsWith('op.')) {
       const opCode = ph.slice(3);
-      const refOp = schema[_ftCtx.ti].operations.find(o => o.code === opCode);
+      const refOp = schema[ti].operations.find(o => o.code === opCode);
       if (refOp && refOp.formula.trim()) {
         const subResult = evalSubFormula(refOp.formula, `${safeId}_`);
         if (subResult.value === null) {
@@ -458,51 +627,266 @@ function runFormulaTest() {
         return;
       }
     }
-    const el = document.getElementById(safeId);
-    values[ph] = el ? el.value : '0';
+    values[ph] = readFtParamValue(safeId);
   });
-
-  if (errors.length > 0) {
-    document.getElementById('ft-result').innerHTML =
-      `<div class="ft-error">${errors.map(e => esc(e)).join('<br>')}</div>`;
-    return;
-  }
-
+  if (errors.length > 0) return { value: null, display: null, error: errors.join('<br>') };
   let display = formula;
   for (const [ph, val] of Object.entries(values)) {
     display = display.replace(new RegExp('\\{' + ph.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\}', 'g'), val);
   }
-
-  let result;
   try {
     const expr = display
-      .replace(/\^/g, '**')
-      .replace(/\bMod\b/g, '%')
-      .replace(/\bAbs\b/g, 'Math.abs')
-      .replace(/\bInt\b/g, 'Math.floor')
-      .replace(/\bFix\b/g, 'Math.trunc')
-      .replace(/\bSqr\b/g, 'Math.sqrt')
-      .replace(/\bExp\b/g, 'Math.exp')
-      .replace(/\bLog\b/g, 'Math.log')
-      .replace(/\bSin\b/g, 'Math.sin')
-      .replace(/\bCos\b/g, 'Math.cos')
-      .replace(/\bTan\b/g, 'Math.tan')
-      .replace(/\bRound\b/g, 'VbsRound')
+      .replace(/\^/g, '**').replace(/\bMod\b/g, '%')
+      .replace(/\bAbs\b/g, 'Math.abs').replace(/\bInt\b/g, 'Math.floor')
+      .replace(/\bFix\b/g, 'Math.trunc').replace(/\bSqr\b/g, 'Math.sqrt')
+      .replace(/\bExp\b/g, 'Math.exp').replace(/\bLog\b/g, 'Math.log')
+      .replace(/\bSin\b/g, 'Math.sin').replace(/\bCos\b/g, 'Math.cos')
+      .replace(/\bTan\b/g, 'Math.tan').replace(/\bRound\b/g, 'VbsRound')
       .replace(/\\/g, '/');
-    result = new Function('return ' + expr)();
+    const result = new Function('return ' + expr)();
     if (typeof result !== 'number' || !isFinite(result)) throw new Error('Результат не является числом');
-  } catch (e) {
-    document.getElementById('ft-result').innerHTML =
-      `<div class="ft-error">Ошибка вычисления: ${esc(e.message)}</div>`;
+    return { value: result, display };
+  } catch(e) {
+    return { value: null, display: null, error: `Ошибка вычисления: ${esc(e.message)}` };
+  }
+}
+
+function runFormulaTest() {
+  if (!_ftCtx) return;
+  const { ti, oi, isBranched, paramTypes } = _ftCtx;
+  const op = schema[ti].operations[oi];
+
+  if (isBranched) {
+    const getParamVal = code => {
+      const el = document.getElementById('ft_p_' + code.replace(/[^a-zA-Z0-9]/g, '_'));
+      return el ? el.value : '';
+    };
+    const evalCondGroup = group => group.every(c => {
+      const pType = (paramTypes && paramTypes.get(c.code)) || 'String';
+      const isNum = ['Integer', 'Float'].includes(pType);
+      const a = isNum ? parseFloat(getParamVal(c.code)) : String(getParamVal(c.code));
+      const b = isNum ? parseFloat(c.value) : String(c.value);
+      switch (c.op) {
+        case '=':  return a == b;
+        case '≠':  return a != b;
+        case '<':  return a < b;
+        case '>':  return a > b;
+        case '≤':  return a <= b;
+        case '≥':  return a >= b;
+        default:   return false;
+      }
+    });
+
+    const branches = op.formulaBranches;
+    let matchedIdx = branches.length - 1; // default
+    for (let bi = 0; bi < branches.length - 1; bi++) {
+      const groups = branches[bi].conditionGroups || [];
+      if (groups.length > 0 && groups.some(g => g.length > 0 && evalCondGroup(g))) {
+        matchedIdx = bi; break;
+      }
+    }
+
+    const matched = branches[matchedIdx];
+    const isDefault = matchedIdx === branches.length - 1;
+    const matchLabel = isDefault ? 'По умолчанию' : `Вариант ${matchedIdx + 1}`;
+
+    if (!matched.formula) {
+      document.getElementById('ft-result').innerHTML =
+        `<div class="ft-error">${esc(matchLabel)}: формула не задана</div>`;
+      return;
+    }
+
+    const res = evalMainFormula(matched.formula, ti);
+    if (res.value === null) {
+      document.getElementById('ft-result').innerHTML =
+        `<div class="ft-error">${esc(matchLabel)}: ${res.error}</div>`;
+      return;
+    }
+
+    const rounded = Math.round(res.value * 1e10) / 1e10;
+    document.getElementById('ft-result').innerHTML = `
+      <div class="ft-result-box">
+        <div class="ft-result-branch${isDefault ? ' default' : ''}">${isDefault ? 'По умолчанию' : `Вариант ${matchedIdx + 1}`}</div>
+        <div class="ft-result-expr">${esc(res.display)}</div>
+        <div class="ft-result-val">= ${rounded}</div>
+      </div>`;
     return;
   }
 
-  const rounded = Math.round(result * 1e10) / 1e10;
+  const res = evalMainFormula(op.formula, ti);
+  if (res.value === null) {
+    document.getElementById('ft-result').innerHTML = `<div class="ft-error">${res.error}</div>`;
+    return;
+  }
+  const rounded = Math.round(res.value * 1e10) / 1e10;
   document.getElementById('ft-result').innerHTML = `
     <div class="ft-result-box">
-      <div class="ft-result-expr">${esc(display)}</div>
+      <div class="ft-result-expr">${esc(res.display)}</div>
       <div class="ft-result-val">= ${rounded}</div>
     </div>`;
+}
+
+// ---- SHTS / Prof branches (generic field) ----
+function addFieldBranch(ti, oi, field) {
+  const op = schema[ti].operations[oi];
+  const branchKey = field + 'Branches';
+  const newBranch = { conditionGroups: [[_newCondition(ti, oi)]], value: '' };
+  if (!op[branchKey]) {
+    op[branchKey] = [newBranch, { conditionGroups: [], value: op[field] || '' }];
+    op[field] = '';
+  } else {
+    op[branchKey].splice(op[branchKey].length - 1, 0, newBranch);
+  }
+  renderEditor(); scheduleGen(true);
+}
+
+function removeFieldBranch(ti, oi, field, bi) {
+  const op = schema[ti].operations[oi];
+  const branchKey = field + 'Branches';
+  op[branchKey].splice(bi, 1);
+  if (op[branchKey].length === 1 && op[branchKey][0].conditionGroups.length === 0) {
+    op[field] = op[branchKey][0].value;
+    op[branchKey] = undefined;
+  }
+  renderEditor(); scheduleGen(true);
+}
+
+function convertToSimpleField(ti, oi, field) {
+  const op = schema[ti].operations[oi];
+  const branchKey = field + 'Branches';
+  const def = op[branchKey][op[branchKey].length - 1];
+  op[field] = def ? def.value : '';
+  op[branchKey] = undefined;
+  renderEditor(); scheduleGen(true);
+}
+
+function addFieldBranchCond(ti, oi, field, bi, gi) {
+  schema[ti].operations[oi][field + 'Branches'][bi].conditionGroups[gi].push(_newCondition(ti, oi));
+  renderEditor(); scheduleGen(true);
+}
+
+function removeFieldBranchCond(ti, oi, field, bi, gi, ci) {
+  const groups = schema[ti].operations[oi][field + 'Branches'][bi].conditionGroups;
+  groups[gi].splice(ci, 1);
+  if (groups[gi].length === 0) groups.splice(gi, 1);
+  renderEditor(); scheduleGen(true);
+}
+
+function addFieldBranchOrGroup(ti, oi, field, bi) {
+  schema[ti].operations[oi][field + 'Branches'][bi].conditionGroups.push([_newCondition(ti, oi)]);
+  renderEditor(); scheduleGen(true);
+}
+
+function updateFieldBranchCond(ti, oi, field, bi, gi, ci, f, val) {
+  const c = schema[ti].operations[oi][field + 'Branches'][bi].conditionGroups[gi][ci];
+  c[f] = val;
+  if (f === 'code') {
+    const params = getAllOpParams(ti, oi);
+    const p = params.find(p => p.code === val);
+    if (p && p.type === 'List') { const v = (p.defaultVal||'').split(';').filter(Boolean); c.value = v[0] || ''; }
+    else if (p && p.type === 'Boolean') c.value = 'True';
+    else c.value = '';
+    if (p && !['Integer','Float'].includes(p.type) && ['<','>','≤','≥'].includes(c.op)) c.op = '=';
+    renderEditor(); scheduleGen(true);
+  } else {
+    scheduleGen(false);
+  }
+}
+
+function updateFieldBranchValue(ti, oi, field, bi, val) {
+  schema[ti].operations[oi][field + 'Branches'][bi].value = val;
+  scheduleGen(false);
+}
+
+// ---- Protocol branches ----
+function addProtocolBranch(ti, oi) {
+  const op = schema[ti].operations[oi];
+  const newBranch = { conditionGroups: [[_newCondition(ti, oi)]], protocol: [] };
+  if (!op.protocolBranches) {
+    op.protocolBranches = [newBranch, { conditionGroups: [], protocol: op.protocol || [] }];
+    op.protocol = [];
+  } else {
+    op.protocolBranches.splice(op.protocolBranches.length - 1, 0, newBranch);
+  }
+  renderEditor(); scheduleGen(true);
+}
+
+function removeProtocolBranch(ti, oi, bi) {
+  const op = schema[ti].operations[oi];
+  op.protocolBranches.splice(bi, 1);
+  if (op.protocolBranches.length === 1 && op.protocolBranches[0].conditionGroups.length === 0) {
+    op.protocol = op.protocolBranches[0].protocol;
+    op.protocolBranches = undefined;
+  }
+  renderEditor(); scheduleGen(true);
+}
+
+function convertToSimpleProtocol(ti, oi) {
+  const op = schema[ti].operations[oi];
+  const def = op.protocolBranches[op.protocolBranches.length - 1];
+  op.protocol = def ? def.protocol : [];
+  op.protocolBranches = undefined;
+  renderEditor(); scheduleGen(true);
+}
+
+function addProtoBranchCondition(ti, oi, bi, gi) {
+  schema[ti].operations[oi].protocolBranches[bi].conditionGroups[gi].push(_newCondition(ti, oi));
+  renderEditor(); scheduleGen(true);
+}
+
+function removeProtoBranchCondition(ti, oi, bi, gi, ci) {
+  const groups = schema[ti].operations[oi].protocolBranches[bi].conditionGroups;
+  groups[gi].splice(ci, 1);
+  if (groups[gi].length === 0) groups.splice(gi, 1);
+  renderEditor(); scheduleGen(true);
+}
+
+function addProtoBranchOrGroup(ti, oi, bi) {
+  schema[ti].operations[oi].protocolBranches[bi].conditionGroups.push([_newCondition(ti, oi)]);
+  renderEditor(); scheduleGen(true);
+}
+
+function updateProtoBranchCondField(ti, oi, bi, gi, ci, field, val) {
+  const c = schema[ti].operations[oi].protocolBranches[bi].conditionGroups[gi][ci];
+  c[field] = val;
+  if (field === 'code') {
+    const params = getAllOpParams(ti, oi);
+    const p = params.find(p => p.code === val);
+    if (p && p.type === 'List') { const v = (p.defaultVal||'').split(';').filter(Boolean); c.value = v[0] || ''; }
+    else if (p && p.type === 'Boolean') c.value = 'True';
+    else c.value = '';
+    if (p && !['Integer','Float'].includes(p.type) && ['<','>','≤','≥'].includes(c.op)) c.op = '=';
+    renderEditor(); scheduleGen(true);
+  } else {
+    scheduleGen(false);
+  }
+}
+
+function addProtoBranchLine(ti, oi, bi) {
+  schema[ti].operations[oi].protocolBranches[bi].protocol.push('');
+  renderEditor(); scheduleGen(true);
+}
+
+function deleteProtoBranchLine(ti, oi, bi, li) {
+  schema[ti].operations[oi].protocolBranches[bi].protocol.splice(li, 1);
+  renderEditor(); scheduleGen(true);
+}
+
+function updateProtoBranchLine(ti, oi, bi, li, val) {
+  schema[ti].operations[oi].protocolBranches[bi].protocol[li] = val;
+  scheduleGen(false);
+}
+
+function applyProtoBranchTemplate(ti, oi, bi) {
+  schema[ti].operations[oi].protocolBranches[bi].protocol = [
+    'Операция «{NAME}»',
+    'Расчёт по нормативу ',
+    'Применяемая формула: T =',
+    'Расчёт: Т =',
+    'Код профессии {PROF}, разряд {SHTS}',
+    ''
+  ];
+  renderEditor(); scheduleGen(true);
 }
 
 function applyProtocolTemplate(ti, oi) {
@@ -572,6 +956,7 @@ function updateParam(scope, ti, oi, pi, field, val) {
 // ============================================================
 function selectTable(idx) {
   sel = { kind: 'table', idx };
+  renderSidebar();
   renderSidebarTables();
   renderEditor();
 }

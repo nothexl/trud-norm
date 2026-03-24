@@ -112,6 +112,48 @@ function protoDrop(e, ti, oi, toLi) {
   renderEditor(); scheduleGen(true);
 }
 
+let _protoBranchDrag = null;
+let _protoBranchGripDown = false;
+document.addEventListener('mouseup', () => { _protoBranchGripDown = false; });
+
+function protoBranchGripMouseDown() { _protoBranchGripDown = true; }
+
+function protoBranchDragStart(e, ti, oi, bi, li) {
+  if (!_protoBranchGripDown) { e.preventDefault(); return; }
+  _protoBranchGripDown = false;
+  _protoBranchDrag = { ti, oi, bi, li };
+  e.dataTransfer.effectAllowed = 'move';
+  const el = e.currentTarget;
+  setTimeout(() => el.classList.add('param-dragging'), 0);
+}
+function protoBranchDragOver(e, li) {
+  e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+  const el = e.currentTarget;
+  el.classList.remove('param-drag-top', 'param-drag-bottom');
+  el._prPos = e.clientY < el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2 ? 'before' : 'after';
+  el.classList.add(el._prPos === 'before' ? 'param-drag-top' : 'param-drag-bottom');
+}
+function protoBranchDragLeave(e) { e.currentTarget.classList.remove('param-drag-top', 'param-drag-bottom'); }
+function protoBranchDragEnd(e) {
+  const el = e.currentTarget;
+  if (el) el.classList.remove('param-dragging');
+  document.querySelectorAll('.proto-line-row.param-drag-top,.proto-line-row.param-drag-bottom').forEach(el => el.classList.remove('param-drag-top', 'param-drag-bottom'));
+  _protoBranchDrag = null;
+}
+function protoBranchDrop(e, ti, oi, bi, toLi) {
+  e.preventDefault();
+  const el = e.currentTarget;
+  el.classList.remove('param-drag-top', 'param-drag-bottom');
+  if (!_protoBranchDrag) return;
+  const fromLi = _protoBranchDrag.li;
+  const insertAt = el._prPos === 'after' ? toLi + 1 : toLi;
+  if (fromLi === insertAt || fromLi + 1 === insertAt) return;
+  const lines = schema[ti].operations[oi].protocolBranches[bi].protocol;
+  const [moved] = lines.splice(fromLi, 1);
+  lines.splice(insertAt > fromLi ? insertAt - 1 : insertAt, 0, moved);
+  renderEditor(); scheduleGen(true);
+}
+
 function paramDragStart(e, scope, ti, oi, pi) {
   if (!_paramGripDown) { e.preventDefault(); return; }
   _paramGripDown = false;
@@ -269,6 +311,32 @@ function rowDrop(e, idx, toRi) {
   scheduleGen(true);
 }
 
+// ---- ParamSet Card DnD ----
+let _psDrag = null;
+function psDragStart(e, ti, si) {
+  e.stopPropagation();
+  _psDrag = { ti, si };
+  e.dataTransfer.setData('text', '');
+  e.dataTransfer.effectAllowed = 'move';
+  setTimeout(() => e.currentTarget.classList.add('dragging'), 0);
+}
+function psDragOver(e) { e.stopPropagation(); e.preventDefault(); e.dataTransfer.dropEffect = 'move'; e.currentTarget.classList.add('drag-over'); }
+function psDragLeave(e) { e.stopPropagation(); e.currentTarget.classList.remove('drag-over'); }
+function psDragEnd(e) {
+  e.currentTarget.classList.remove('dragging');
+  document.querySelectorAll('.paramset-card.drag-over').forEach(el => el.classList.remove('drag-over'));
+  _psDrag = null;
+}
+function psDrop(e, ti, toSi) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  if (!_psDrag || _psDrag.ti !== ti || _psDrag.si === toSi) return;
+  const sets = schema[ti].paramSets;
+  const [moved] = sets.splice(_psDrag.si, 1);
+  sets.splice(_psDrag.si < toSi ? toSi - 1 : toSi, 0, moved);
+  renderEditor(); scheduleGen(true);
+}
+
 // ---- List DnD ----
 let _listDrag = null;
 function listDragStart(e, scope, ti, oi, pi, idx) {
@@ -296,6 +364,48 @@ function listDrop(e, scope, ti, oi, pi, toIdx) {
   p.defaultVal = items.join(';');
   refreshListDOM(scope, ti, oi, pi);
   scheduleGen(false);
+}
+
+// ---- CoefList Item DnD ----
+let _coefItemDrag = null;
+let _coefItemGripDown = false;
+document.addEventListener('mouseup', () => { _coefItemGripDown = false; });
+
+function coefItemGripMouseDown() { _coefItemGripDown = true; }
+
+function coefItemDragStart(e, scope, ti, oi, pi, ii) {
+  if (!_coefItemGripDown) { e.preventDefault(); return; }
+  _coefItemGripDown = false;
+  e.stopPropagation();
+  _coefItemDrag = { scope, ti, oi, pi, ii };
+  e.dataTransfer.effectAllowed = 'move';
+  setTimeout(() => e.currentTarget.classList.add('param-dragging'), 0);
+}
+function coefItemDragOver(e, ii) {
+  e.stopPropagation(); e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+  const el = e.currentTarget;
+  el.classList.remove('param-drag-top', 'param-drag-bottom');
+  el._ciPos = e.clientY < el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2 ? 'before' : 'after';
+  el.classList.add(el._ciPos === 'before' ? 'param-drag-top' : 'param-drag-bottom');
+}
+function coefItemDragLeave(e) { e.currentTarget.classList.remove('param-drag-top', 'param-drag-bottom'); }
+function coefItemDragEnd(e) {
+  e.currentTarget.classList.remove('param-dragging');
+  document.querySelectorAll('.coef-item-row.param-drag-top,.coef-item-row.param-drag-bottom').forEach(el => el.classList.remove('param-drag-top', 'param-drag-bottom'));
+  _coefItemDrag = null;
+}
+function coefItemDrop(e, scope, ti, oi, pi, toIi) {
+  e.stopPropagation(); e.preventDefault();
+  const el = e.currentTarget;
+  el.classList.remove('param-drag-top', 'param-drag-bottom');
+  if (!_coefItemDrag) return;
+  const fromIi = _coefItemDrag.ii;
+  const insertAt = el._ciPos === 'after' ? toIi + 1 : toIi;
+  if (fromIi === insertAt || fromIi + 1 === insertAt) return;
+  const items = getParams(scope, ti, oi)[pi].items;
+  const [moved] = items.splice(fromIi, 1);
+  items.splice(insertAt > fromIi ? insertAt - 1 : insertAt, 0, moved);
+  renderEditor(); scheduleGen(true);
 }
 
 // ---- NormTable chip DnD ----

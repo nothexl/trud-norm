@@ -127,21 +127,63 @@ function parsedToSchema(arr) {
       paramSets,
       operations: (Array.isArray(typeArr[2]) ? typeArr[2] : []).map(opArr => ({
         name: String(opArr[0] || ''),
-        shts: String(opArr[1] || ''),
-        prof: String(opArr[2] || ''),
+        shts: Array.isArray(opArr[1]) ? '' : String(opArr[1] || ''),
+        shtsBranches: Array.isArray(opArr[1]) ? opArr[1].map(b => { if (!Array.isArray(b)) return { conditionGroups: [], value: '' }; const parsed = parseConditionStr(String(b[0] || '')); return { conditionGroups: parsed !== null ? parsed : [], value: String(b[1] || '') }; }) : undefined,
+        prof: Array.isArray(opArr[2]) ? '' : String(opArr[2] || ''),
+        profBranches: Array.isArray(opArr[2]) ? opArr[2].map(b => { if (!Array.isArray(b)) return { conditionGroups: [], value: '' }; const parsed = parseConditionStr(String(b[0] || '')); return { conditionGroups: parsed !== null ? parsed : [], value: String(b[1] || '') }; }) : undefined,
         code: String(opArr[3] || ''),
         params: (Array.isArray(opArr[4]) ? opArr[4] : []).map(p => parseParam(p)),
-        formula: String(opArr[5] || ''),
-        protocol: (Array.isArray(opArr[6]) ? opArr[6] : []).map(s => String(s || '')),
+        formula: Array.isArray(opArr[5]) ? '' : String(opArr[5] || ''),
+        formulaBranches: Array.isArray(opArr[5])
+          ? opArr[5].map(b => {
+              if (!Array.isArray(b)) return { conditionGroups: [], formula: '' };
+              const parsed = parseConditionStr(String(b[0] || ''));
+              return { conditionGroups: parsed !== null ? parsed : [], formula: String(b[1] || '') };
+            })
+          : undefined,
+        protocol: (() => { const r = Array.isArray(opArr[6]) ? opArr[6] : []; return (r.length > 0 && Array.isArray(r[0])) ? [] : r.map(s => String(s || '')); })(),
+        protocolBranches: (() => { const r = Array.isArray(opArr[6]) ? opArr[6] : []; if (r.length === 0 || !Array.isArray(r[0])) return undefined; return r.map(b => { if (!Array.isArray(b)) return { conditionGroups: [], protocol: [] }; const parsed = parseConditionStr(String(b[0] || '')); return { conditionGroups: parsed !== null ? parsed : [], protocol: (Array.isArray(b[1]) ? b[1] : []).map(s => String(s || '')) }; }); })(),
         normTables: (Array.isArray(opArr[7]) ? opArr[7] : []).map(s => String(s || '')).filter(Boolean)
       }))
     };
   }).filter(Boolean);
 }
 
+function parseConditionStr(str) {
+  if (!str) return [];
+  const opMap = { '=': '=', '<>': '≠', '<': '<', '>': '>', '<=': '≤', '>=': '≥' };
+  const parseOne = s => {
+    const m = s.trim().match(/^\{p\.([^}]+)\}\s*(=|<>|<=|>=|<|>)\s*(?:"((?:[^"]|"")*)"|(-?[\d.]+))$/);
+    if (!m) return null;
+    const value = m[3] !== undefined ? m[3].replace(/""/g, '"') : (m[4] || '');
+    return { code: m[1], op: opMap[m[2]] || '=', value };
+  };
+  const orParts = str.split(/\s+Or\s+/i).map(s => s.trim().replace(/^\(|\)$/g, ''));
+  const groups = [];
+  for (const orPart of orParts) {
+    const andParts = orPart.split(/\s+And\s+/i);
+    const group = [];
+    for (const part of andParts) {
+      const c = parseOne(part);
+      if (!c) return null;
+      group.push(c);
+    }
+    groups.push(group);
+  }
+  return groups;
+}
+
 function parseParam(p) {
   if (!Array.isArray(p)) return { name:'', code:'', type:'String', defaultVal:'' };
   const type = String(p[2] || 'String');
+  if (type === 'CoefList') {
+    const rawItems = Array.isArray(p[3]) ? p[3] : [];
+    const items = rawItems.map(it => Array.isArray(it)
+      ? { label: String(it[0] || ''), value: parseFloat(it[1]) || 1 }
+      : { label: '', value: 1 }
+    );
+    return { name: String(p[0] || ''), code: String(p[1] || ''), type, items, maxSelect: parseInt(p[4]) || 1 };
+  }
   const raw = p[3];
   let defaultVal = '';
   if (typeof raw === 'boolean') defaultVal = raw ? 'True' : 'False';
