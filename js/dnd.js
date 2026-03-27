@@ -433,3 +433,29 @@ function ntDrop(e, ti, oi, toIdx) {
   refreshNormTablesDOM(ti, oi);
   scheduleGen(false);
 }
+
+// ---- Document chip DnD ----
+let _docDrag = null;
+function docDragStart(e, ti, oi, idx) {
+  _docDrag = { ti, oi, idx };
+  e.dataTransfer.setData('text', '');
+  e.dataTransfer.effectAllowed = 'move';
+  setTimeout(() => e.target.classList.add('dragging'), 0);
+}
+function docDragOver(e) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; e.currentTarget.classList.add('drag-over'); }
+function docDragLeave(e) { e.currentTarget.classList.remove('drag-over'); }
+function docDragEnd(e) {
+  e.target.classList.remove('dragging');
+  document.querySelectorAll('.list-tag.drag-over').forEach(el => el.classList.remove('drag-over'));
+  _docDrag = null;
+}
+function docDrop(e, ti, oi, toIdx) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  if (!_docDrag || _docDrag.ti !== ti || _docDrag.oi !== oi || _docDrag.idx === toIdx) return;
+  const items = schema[ti].operations[oi].documents;
+  const [moved] = items.splice(_docDrag.idx, 1);
+  items.splice(toIdx, 0, moved);
+  refreshDocumentsDOM(ti, oi);
+  scheduleGen(false);
+}

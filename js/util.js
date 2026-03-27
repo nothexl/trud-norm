@@ -86,6 +86,46 @@ function removeNormTable(ti, oi, idx) {
   scheduleGen(false);
 }
 
+function buildDocumentChips(ti, oi, items) {
+  return items.map((item, idx) =>
+    `<span class="list-tag" draggable="true"` +
+    ` ondragstart="docDragStart(event,${ti},${oi},${idx})"` +
+    ` ondragover="docDragOver(event)"` +
+    ` ondragleave="docDragLeave(event)"` +
+    ` ondrop="docDrop(event,${ti},${oi},${idx})"` +
+    ` ondragend="docDragEnd(event,${ti},${oi})"` +
+    `>${esc(item)}<button class="list-tag-del" onclick="removeDocument(${ti},${oi},${idx})" title="Удалить">×</button></span>`
+  ).join('');
+}
+
+function refreshDocumentsDOM(ti, oi) {
+  const el = document.getElementById(`doc-${ti}-${oi}`);
+  if (!el) return;
+  const items = schema[ti].operations[oi].documents || [];
+  el.innerHTML = buildDocumentChips(ti, oi, items);
+  const tag = document.getElementById(`doc-tag-${ti}-${oi}`);
+  if (tag) tag.textContent = items.length;
+}
+
+function addDocument(ti, oi, inputEl) {
+  const val = inputEl.value.trim();
+  if (!val) return;
+  const op = schema[ti].operations[oi];
+  if (!op.documents) op.documents = [];
+  op.documents.push(val);
+  inputEl.value = '';
+  refreshDocumentsDOM(ti, oi);
+  scheduleGen(false);
+}
+
+function removeDocument(ti, oi, idx) {
+  const op = schema[ti].operations[oi];
+  if (!op.documents) return;
+  op.documents.splice(idx, 1);
+  refreshDocumentsDOM(ti, oi);
+  scheduleGen(false);
+}
+
 function getListValuesForCode(code) {
   const values = new Set();
   schema.forEach(type => {

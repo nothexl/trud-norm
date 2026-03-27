@@ -143,7 +143,8 @@ function parsedToSchema(arr) {
           : undefined,
         protocol: (() => { const r = Array.isArray(opArr[6]) ? opArr[6] : []; return (r.length > 0 && Array.isArray(r[0])) ? [] : r.map(s => String(s || '')); })(),
         protocolBranches: (() => { const r = Array.isArray(opArr[6]) ? opArr[6] : []; if (r.length === 0 || !Array.isArray(r[0])) return undefined; return r.map(b => { if (!Array.isArray(b)) return { conditionGroups: [], protocol: [] }; const parsed = parseConditionStr(String(b[0] || '')); return { conditionGroups: parsed !== null ? parsed : [], protocol: (Array.isArray(b[1]) ? b[1] : []).map(s => String(s || '')) }; }); })(),
-        normTables: (Array.isArray(opArr[7]) ? opArr[7] : []).map(s => String(s || '')).filter(Boolean)
+        normTables: (Array.isArray(opArr[7]) ? opArr[7] : []).map(s => String(s || '')).filter(Boolean),
+        documents: (Array.isArray(opArr[8]) ? opArr[8] : []).map(s => String(s || '')).filter(Boolean)
       }))
     };
   }).filter(Boolean);

@@ -256,6 +256,7 @@ function renderOpEditor(ti, oi) {
     ${renderOpFieldSection(ti, oi, 'shts', 'ШТС', 'Разряд')}
     ${renderOpFieldSection(ti, oi, 'prof', 'Профессия (код)', 'Код профессии')}
     ${renderNormTablesSection(ti, oi)}
+    ${renderDocumentsSection(ti, oi)}
     <div class="section">
       <div class="section-title">
         <span class="stitle">Уникальные параметры операции ${paramTag}</span>
@@ -435,6 +436,23 @@ function renderNormTablesSection(ti, oi) {
         <div id="nt-${ti}-${oi}" class="list-tags">${chips}</div>
         <input class="list-add-input" type="text" placeholder="Обозначение таблицы + Enter"
           onkeydown="if(event.key==='Enter'){addNormTable(${ti},${oi},this);event.preventDefault()}">
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderDocumentsSection(ti, oi) {
+  const items = schema[ti].operations[oi].documents || [];
+  const chips = buildDocumentChips(ti, oi, items);
+  return `<div class="section">
+    <div class="section-title">
+      <span class="stitle">Документы <span class="tag" id="doc-tag-${ti}-${oi}">${items.length}</span></span>
+    </div>
+    <div class="section-body">
+      <div class="list-editor">
+        <div id="doc-${ti}-${oi}" class="list-tags">${chips}</div>
+        <input class="list-add-input" type="text" placeholder="Обозначение документа + Enter"
+          onkeydown="if(event.key==='Enter'){addDocument(${ti},${oi},this);event.preventDefault()}">
       </div>
     </div>
   </div>`;

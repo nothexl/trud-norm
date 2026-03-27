@@ -48,7 +48,7 @@ function addOp(ti) {
   const usedCodes = new Set(ops.map(op => op.code));
   let n = ops.length + 1;
   while (usedCodes.has(`${prefix}_${n}`)) n++;
-  ops.push({ name: 'Новая операция', shts: '', prof: '', code: `${prefix}_${n}`, params: [], formula: '', protocol: [], normTables: [] });
+  ops.push({ name: 'Новая операция', shts: '', prof: '', code: `${prefix}_${n}`, params: [], formula: '', protocol: [], normTables: [], documents: [] });
   sel = { kind:'op', ti, oi: ops.length - 1 };
   expandedTypes.add(ti);
   renderAll(true);
@@ -1157,6 +1157,7 @@ function loadExample() {
           code: "T_PREP",
           params: [],
           normTables: ["ГКЛИ.3520-109 Карта 1"],
+          documents: ["ГКЛИ.3520-109-2018"],
           formula: "{p.L_PIPE} * 0.02",
           protocol: [
             "Операция «{NAME}»",
