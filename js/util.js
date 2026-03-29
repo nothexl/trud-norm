@@ -118,6 +118,11 @@ function addDocument(ti, oi, inputEl) {
   scheduleGen(false);
 }
 
+function setTechKit(ti, oi, val) {
+  schema[ti].operations[oi].techKit = val.trim();
+  scheduleGen(false);
+}
+
 function removeDocument(ti, oi, idx) {
   const op = schema[ti].operations[oi];
   if (!op.documents) return;

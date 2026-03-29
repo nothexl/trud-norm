@@ -145,14 +145,15 @@ function generateCode() {
         }
         const docs = op.documents || [];
         if (docs.length === 0) {
-          out.push(`        Array() _`);
+          out.push(`        Array(), _`);
         } else {
           out.push(`        Array( _`);
           docs.forEach((d, di) => {
             out.push(`          "${vb(d)}"${di < docs.length - 1 ? ', _' : ' _'}`);
           });
-          out.push(`        ) _`);
+          out.push(`        ), _`);
         }
+        out.push(`        "${vb(op.techKit || '')}" _`);
         out.push(`      )${sep}`);
       });
       out.push(`    ) _`);

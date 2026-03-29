@@ -257,6 +257,7 @@ function renderOpEditor(ti, oi) {
     ${renderOpFieldSection(ti, oi, 'prof', 'Профессия (код)', 'Код профессии')}
     ${renderNormTablesSection(ti, oi)}
     ${renderDocumentsSection(ti, oi)}
+    ${renderTechKitSection(ti, oi)}
     <div class="section">
       <div class="section-title">
         <span class="stitle">Уникальные параметры операции ${paramTag}</span>
@@ -436,6 +437,22 @@ function renderNormTablesSection(ti, oi) {
         <div id="nt-${ti}-${oi}" class="list-tags">${chips}</div>
         <input class="list-add-input" type="text" placeholder="Обозначение таблицы + Enter"
           onkeydown="if(event.key==='Enter'){addNormTable(${ti},${oi},this);event.preventDefault()}">
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderTechKitSection(ti, oi) {
+  const val = schema[ti].operations[oi].techKit || '';
+  return `<div class="section">
+    <div class="section-title">
+      <span class="stitle">Тех. комплект</span>
+    </div>
+    <div class="section-body">
+      <div class="list-editor">
+        <input class="list-add-input" type="text" value="${esc(val)}"
+          placeholder="Обозначение тех. комплекта"
+          oninput="setTechKit(${ti},${oi},this.value)">
       </div>
     </div>
   </div>`;

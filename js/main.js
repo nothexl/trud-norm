@@ -48,7 +48,7 @@ function addOp(ti) {
   const usedCodes = new Set(ops.map(op => op.code));
   let n = ops.length + 1;
   while (usedCodes.has(`${prefix}_${n}`)) n++;
-  ops.push({ name: 'Новая операция', shts: '', prof: '', code: `${prefix}_${n}`, params: [], formula: '', protocol: [], normTables: [], documents: [] });
+  ops.push({ name: 'Новая операция', shts: '', prof: '', code: `${prefix}_${n}`, params: [], formula: '', protocol: [], normTables: [], documents: [], techKit: '' });
   sel = { kind:'op', ti, oi: ops.length - 1 };
   expandedTypes.add(ti);
   renderAll(true);
@@ -1264,6 +1264,7 @@ function loadExample() {
     if (op.protocol === undefined) op.protocol = [];
     if (op.shts === undefined) op.shts = '';
     if (op.prof === undefined) op.prof = '';
+    if (op.techKit === undefined) op.techKit = '';
   });
   coefTables = [
     {
