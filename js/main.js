@@ -311,7 +311,7 @@ function makeParamInput(id, pType, defVal) {
     const opts = (defVal || '').split(';').filter(Boolean);
     return `<select id="${id}" class="ft-input">${opts.map(o => `<option>${esc(o)}</option>`).join('')}</select>`;
   }
-  if (pType === 'Boolean') return `<select id="${id}" class="ft-input"><option value="-1">True</option><option value="0">False</option></select>`;
+  if (pType === 'Boolean') return `<select id="${id}" class="ft-input"><option value="True">True</option><option value="False">False</option></select>`;
   if (pType === 'Integer') return `<input type="number" step="1" id="${id}" class="ft-input" value="${parseInt(defVal) || 0}">`;
   const fv = parseFloat(defVal);
   return `<input type="number" step="0.01" id="${id}" class="ft-input" value="${isNaN(fv) ? 0 : fv}">`;
