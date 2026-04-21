@@ -8,6 +8,14 @@ function loadScript(event) {
     if (parsed.length === 0) { alert('Схема найдена, но не содержит типов.'); return; }
     schema = parsed;
     coefTables = parseCoefTablesFromScript(e.target.result);
+    // Обрезаем лишние пробелы в строковых значениях ячеек (защита от внешних скриптов)
+    coefTables.forEach(tbl => {
+      tbl.rows.forEach(row => {
+        row.forEach((cell, ci) => {
+          if (typeof cell === 'string') row[ci] = cell.trim();
+        });
+      });
+    });
     sel = { kind:'type', ti: 0 };
     expandedTypes = new Set([0]);
     renderAll(true);

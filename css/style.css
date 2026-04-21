@@ -164,6 +164,8 @@ tr.param-drag-bottom td { box-shadow: inset 0 -2px 0 #1a56db; }
 .btn-primary:hover { background: #1548bf; }
 .btn-secondary { background: transparent; border: 1px solid #ccc; color: #999; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; }
 .btn-secondary:hover { background: #f0f0f0; border-color: #aaa; color: #666; }
+.btn-ghost { background: transparent; border: 1px solid #e0e0e0; color: #666; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+.btn-ghost:hover { background: #f5f5f5; border-color: #ccc; }
 .btn-sm { padding: 3px 9px; font-size: 11px; }
 
 /* SIDEBAR SUB-HEADER */
@@ -185,15 +187,16 @@ tr.param-drag-bottom td { box-shadow: inset 0 -2px 0 #1a56db; }
 /* COEF TABLE EDITOR */
 .coef-table-wrap { overflow-x: auto; }
 .coef-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.coef-table th { text-align: left; padding: 5px 8px; background: #f5f7fa; font-size: 11px; color: #666; font-weight: 600; border-bottom: 2px solid #e0e0e0; border-right: 1px solid #e8e8e8; white-space: nowrap; }
-.coef-table th:last-child { border-right: none; width: 26px; }
-.coef-table th.col-ctl, .coef-table td.col-ctl { border-right: none; }
+.coef-table th { text-align: left; padding: 5px 6px; background: #f5f7fa; font-size: 11px; color: #666; font-weight: 600; border-bottom: 2px solid #e0e0e0; border-right: 1px solid #e8e8e8; white-space: normal; min-width: 80px; }
+.coef-table th:last-child { border-right: none; width: 26px; min-width: 0; padding: 3px 2px; }
+.coef-table th.col-ctl { border-right: none; min-width: 0; width: 22px; padding: 3px 2px; }
+.coef-table td.col-ctl { border-right: none; padding: 3px 1px; }
 .coef-table th.value-col { background: #eef3ff; color: #1a56db; }
 .coef-table td { padding: 3px 4px; border-bottom: 1px solid #f0f0f0; border-right: 1px solid #f0f0f0; vertical-align: middle; }
-.coef-table td:last-child { border-right: none; text-align: center; width: 26px; }
+.coef-table td:last-child { border-right: none; text-align: center; width: 26px; padding: 3px 1px; }
 .coef-table td.value-cell { background: #f8faff; }
-.coef-table input, .coef-table select { width: 100%; padding: 3px 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px; background: #fff; box-sizing: border-box; }
-.coef-table input:focus, .coef-table select:focus { outline: none; border-color: #1a56db; }
+.coef-table input:not(.coef-col-filter), .coef-table select:not(.coef-col-filter) { width: 100%; padding: 3px 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px; background: #fff; box-sizing: border-box; }
+.coef-table input:not(.coef-col-filter):focus, .coef-table select:not(.coef-col-filter):focus { outline: none; border-color: #1a56db; }
 .coef-table tr:hover td { background: #fafbff; }
 .coef-table tr:hover td.value-cell { background: #f0f5ff; }
 
@@ -284,6 +287,58 @@ tr.param-drag-bottom td { box-shadow: inset 0 -2px 0 #1a56db; }
 .formula-chip.coef-ref:hover { background: #fce7f3; }
 .formula-chip.fn-chip { background: #fef3c7; color: #92400e; }
 .formula-chip.fn-chip:hover { background: #fde68a; }
+.formula-chip.pop-ref { background: #ecfdf5; color: #065f46; }
+.formula-chip.pop-ref:hover { background: #d1fae5; }
+
+/* CHIP GROUPS */
+.chip-groups-wrap { width: 100%; flex: 0 0 100%; display: flex; flex-direction: column; gap: 3px; margin-bottom: 10px; }
+.chip-search-bar { display: flex; align-items: center; margin-bottom: 4px; }
+.chip-search-wrap { position: relative; flex: 1; }
+.chip-search-icon { position: absolute; left: 7px; top: 50%; transform: translateY(-50%); font-size: 12px; color: #bbb; pointer-events: none; line-height: 1; }
+.chip-search-input { width: 100%; padding: 4px 8px 4px 24px; border: 1px solid #dde3ee; border-radius: 4px; font-size: 12px; background: #f8faff; outline: none; box-sizing: border-box; }
+.chip-search-input:focus { border-color: #1a56db; background: #fff; }
+/* Убираем лишний верхний отступ у formula-chips когда внутри chip-groups-wrap */
+.formula-chips:has(.chip-groups-wrap) { margin-top: 0; }
+.chip-group { border: 1px solid #eaecf0; border-radius: 5px; overflow: hidden; }
+.chip-group-toggle { width: 100%; display: flex; align-items: center; gap: 6px; padding: 4px 8px; background: #f5f7fb; border: none; cursor: pointer; font-size: 11px; color: #555; text-align: left; }
+.chip-group-toggle:hover { background: #eef1f8; }
+.chip-group-arrow { font-size: 9px; color: #999; width: 10px; flex-shrink: 0; }
+.chip-group-count { margin-left: auto; background: #dde3ee; color: #555; border-radius: 8px; padding: 0 6px; font-size: 10px; line-height: 16px; }
+.chip-group-body { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px; background: #fff; }
+.chip-group-body.chip-group-subgroups { flex-direction: column; gap: 2px; padding: 4px; }
+.chip-group-hidden { display: none; }
+/* Подгруппы (вложенные группы операций внутри «Параметры других операций») */
+.chip-subgroup { border-color: #edf0f7; }
+.chip-subgroup .chip-group-toggle { background: #f9fafc; font-size: 11px; padding: 2px 8px; }
+.chip-subgroup .chip-group-body { padding: 4px 8px; }
+
+/* COEF TABLE SCROLL + STICKY HEADER */
+.coef-table-scroll { max-height: 65vh; overflow-y: auto; border: 1px solid #e8e8e8; border-radius: 4px; }
+.coef-table-scroll .coef-table thead th { position: sticky; top: 0; z-index: 2; }
+
+/* COLUMN HEADER WITH FILTER BUTTON */
+.col-hdr-wrap { display: flex; align-items: center; gap: 3px; }
+.col-hdr-name { flex: 1; }
+.col-filter-btn { flex-shrink: 0; background: none; border: 1px solid transparent; border-radius: 3px; cursor: pointer; font-size: 10px; color: #aaa; padding: 1px 3px; line-height: 1; transition: all 0.1s; }
+.col-filter-btn:hover { background: #e8edf5; border-color: #cdd3e0; color: #555; }
+.col-filter-btn.active { background: #dbeafe; border-color: #3b82f6; color: #1d4ed8; font-weight: bold; }
+.coef-filter-clear { background: none; border: none; cursor: pointer; color: #e53e3e; font-size: 13px; padding: 0; line-height: 1; display: block; }
+.coef-filter-clear:hover { color: #c53030; }
+.coef-row-count { font-size: 11px; color: #999; white-space: nowrap; display: block; margin-top: 2px; }
+
+/* DROPDOWN PANEL */
+.cf-dropdown { position: fixed; z-index: 9999; background: #fff; border: 1px solid #dde3ee; border-radius: 6px; box-shadow: 0 4px 20px rgba(0,0,0,0.14); width: 230px; display: none; }
+.cf-dd-search { padding: 8px 8px 4px; }
+.cf-dd-search input { width: 100%; padding: 5px 8px; border: 1px solid #dde3ee; border-radius: 4px; font-size: 12px; outline: none; box-sizing: border-box; }
+.cf-dd-search input:focus { border-color: #3b82f6; }
+.cf-dd-actions { display: flex; gap: 10px; padding: 2px 10px 6px; border-bottom: 1px solid #f0f0f0; }
+.cf-dd-link { background: none; border: none; cursor: pointer; font-size: 11px; color: #3b82f6; padding: 0; }
+.cf-dd-link:hover { text-decoration: underline; }
+.cf-dd-list { max-height: 220px; overflow-y: auto; padding: 4px 0; }
+.cf-dd-item { display: flex; align-items: center; gap: 7px; padding: 5px 12px; cursor: pointer; font-size: 12px; user-select: none; }
+.cf-dd-item:hover { background: #f3f7ff; }
+.cf-dd-item input[type=checkbox] { cursor: pointer; accent-color: #3b82f6; }
+.cf-dd-footer { display: flex; gap: 6px; padding: 8px; justify-content: flex-end; border-top: 1px solid #f0f0f0; }
 
 /* FORMULA TEST MODAL */
 .ft-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; z-index: 1000; }

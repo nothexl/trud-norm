@@ -294,6 +294,42 @@ function insertFnAtActive(fn) {
   el.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+function toggleChipGroup(id) {
+  _chipGroupCollapsed[id] = !_chipGroupCollapsed[id];
+  const grp = document.getElementById(`chipgrp-${id}`);
+  if (!grp) return;
+  const arrow = grp.querySelector('.chip-group-arrow');
+  const body  = grp.querySelector('.chip-group-body');
+  if (arrow) arrow.textContent = _chipGroupCollapsed[id] ? '▶' : '▼';
+  if (body)  body.classList.toggle('chip-group-hidden', _chipGroupCollapsed[id]);
+}
+
+function filterChips(query) {
+  const root = document.getElementById('chip-groups-root');
+  if (!root) return;
+  const q = query.trim().toLowerCase();
+  root.querySelectorAll('.chip-group').forEach(grp => {
+    const id = grp.id.replace('chipgrp-', '');
+    const body = grp.querySelector('.chip-group-body');
+    const chips = grp.querySelectorAll('.formula-chip');
+    let anyVisible = false;
+    chips.forEach(btn => {
+      const match = !q || (btn.dataset.chipText || '').includes(q);
+      btn.style.display = match ? '' : 'none';
+      if (match) anyVisible = true;
+    });
+    // Раскрываем группу если есть совпадения
+    if (q && anyVisible) {
+      if (body) body.classList.remove('chip-group-hidden');
+    } else if (!q) {
+      // Восстанавливаем исходное состояние
+      if (body) body.classList.toggle('chip-group-hidden', !!_chipGroupCollapsed[id]);
+    }
+    // Прячем всю группу если ни одного совпадения при поиске
+    grp.style.display = (q && !anyVisible) ? 'none' : '';
+  });
+}
+
 function insertAtActive(text) {
   const el = document.activeElement;
   if (!el || (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA')) return;
@@ -1080,10 +1116,16 @@ function refreshTableColumn(idx, ki) {
 
 function addTableRow(idx) {
   const tbl = coefTables[idx];
-  // keys.length key cells + 1 value cell
   tbl.rows.push(Array(tbl.keys.length + 1).fill(''));
   renderEditor();
   scheduleGen(true);
+  requestAnimationFrame(() => {
+    // Если активны фильтры — переприменить после ре-рендера
+    const hasFilter = _coefFilterState[idx] && Object.values(_coefFilterState[idx]).some(s => s && s.size);
+    if (hasFilter) { applyCoefFilter(idx); } else { _updateFilterBtnStates(idx); }
+    const container = document.getElementById(`coef-scroll-${idx}`);
+    if (container) container.scrollTop = container.scrollHeight;
+  });
 }
 
 function removeTableRow(idx, ri) {
@@ -1094,9 +1136,350 @@ function removeTableRow(idx, ri) {
 
 function updateTableCell(idx, ri, ci, val) {
   coefTables[idx].rows[ri][ci] = val;
+  // Обновляем data-row-text у строки чтобы фильтр не терял изменённые строки
+  const tbody = document.getElementById(`coef-tbody-${idx}`);
+  if (tbody) {
+    const tr = tbody.querySelector(`tr[data-ri="${ri}"]`);
+    if (tr) {
+      const row = coefTables[idx].rows[ri];
+      tr.dataset.rowText = row.map(c => (c || '').toLowerCase()).join(' ');
+    }
+  }
   refreshTableDups(idx);     // immediate row highlighting
   renderValidationBanner();  // immediate banner update
   scheduleGen(false);        // debounced code generation
+}
+
+// =====================================================================
+// ВИРТУАЛЬНЫЙ РЕНДЕР СТРОК CoefTable
+// =====================================================================
+const VIRT_THRESHOLD = 50;   // таблицы с бо́льшим числом строк — виртуальный рендер
+const VIRT_ROW_H    = 30;    // оценочная высота строки, px
+const VIRT_WINDOW   = 80;    // строк в начальном окне
+const VIRT_BUFFER   = 40;    // строк-буфер выше/ниже видимой области
+
+const _tableVirtState = {};  // idx → { listener, filteredRows (null = не фильтр) }
+
+function setupTableVirt(idx) {
+  // Снять старый listener для этой таблицы
+  const old = _tableVirtState[idx];
+  if (old && old.listener && old.container) {
+    old.container.removeEventListener('scroll', old.listener);
+  }
+  const container = document.getElementById(`coef-scroll-${idx}`);
+  if (!container) return;
+  const listener = () => _virtRaf(idx);
+  _tableVirtState[idx] = { listener, container, filteredRows: null, rafPending: false };
+  container.addEventListener('scroll', listener, { passive: true });
+  // Первоначальная синхронизация (может уже прокручено)
+  requestAnimationFrame(() => updateTableVirt(idx));
+}
+
+function cleanupTableVirt() {
+  Object.keys(_tableVirtState).forEach(k => {
+    const s = _tableVirtState[k];
+    if (s && s.listener && s.container) s.container.removeEventListener('scroll', s.listener);
+    delete _tableVirtState[k];
+  });
+}
+
+function _virtRaf(idx) {
+  const s = _tableVirtState[idx];
+  if (!s || s.rafPending) return;
+  s.rafPending = true;
+  requestAnimationFrame(() => { if (s) s.rafPending = false; updateTableVirt(idx); });
+}
+
+function updateTableVirt(idx) {
+  const tbl = coefTables[idx];
+  const tbody = document.getElementById(`coef-tbody-${idx}`);
+  if (!tbl || !tbody) return;
+
+  const state = _tableVirtState[idx];
+  if (!state || !state.container) return;
+
+  // Работаем одинаково в обоих режимах: rowList = null → все строки, array → отфильтрованные
+  const rowList = state.filteredRows; // null | number[]
+  const total   = rowList !== null ? rowList.length : tbl.rows.length;
+
+  // Позиция относительно скролл-контейнера
+  const container = state.container;
+  const scrollTop = container.scrollTop;
+  const viewH     = container.clientHeight;
+  // Логическое смещение tbody внутри контейнера (не зависит от текущего scrollTop)
+  const cRect = container.getBoundingClientRect();
+  const tRect = tbody.getBoundingClientRect();
+  const tbodyOffsetTop = tRect.top - cRect.top + scrollTop;
+
+  // Какие строки должны быть в DOM
+  const relScroll  = Math.max(0, scrollTop - tbodyOffsetTop);
+  const firstVis   = Math.floor(relScroll / VIRT_ROW_H);
+  const lastVis    = Math.ceil((scrollTop + viewH - tbodyOffsetTop) / VIRT_ROW_H);
+  const startRow   = Math.max(0, firstVis - VIRT_BUFFER);
+  const endRow     = Math.min(total - 1, lastVis + VIRT_BUFFER);
+
+  // Текущий рендеренный диапазон из DOM
+  const topSpacer = document.getElementById(`vsp-top-${idx}`);
+  const botSpacer = document.getElementById(`vsp-bot-${idx}`);
+  if (!topSpacer || !botSpacer) return;
+
+  const curStart = parseInt(topSpacer.dataset.end   ?? String(startRow));
+  const curEnd   = parseInt(botSpacer.dataset.start ?? String(endRow));
+  if (curStart === startRow && curEnd === endRow) return; // уже актуально
+
+  const allParamMap = getAllParamMap();
+  const dupRowIdxs  = calcDupRowIdxs(tbl);
+  // li → actual row index
+  const getRi = li => rowList !== null ? rowList[li] : li;
+
+  // ── Инкрементальное обновление (по data-li) ─────────────────────────
+  // 1. Убрать строки, ушедшие выше окна
+  if (curStart < startRow) {
+    tbody.querySelectorAll('tr[data-li]').forEach(tr => {
+      if (parseInt(tr.dataset.li) < startRow) tr.remove();
+    });
+  }
+  // 2. Убрать строки, ушедшие ниже окна
+  if (curEnd > endRow) {
+    tbody.querySelectorAll('tr[data-li]').forEach(tr => {
+      if (parseInt(tr.dataset.li) > endRow) tr.remove();
+    });
+  }
+  // 3. Добавить строки, появившиеся выше
+  if (startRow < curStart) {
+    let html = '';
+    for (let li = startRow; li < Math.min(curStart, endRow + 1); li++)
+      html += buildOneTableRow(idx, getRi(li), li, tbl, allParamMap, dupRowIdxs);
+    topSpacer.insertAdjacentHTML('afterend', html);
+  }
+  // 4. Добавить строки, появившиеся ниже
+  if (endRow > curEnd) {
+    let html = '';
+    for (let li = Math.max(curEnd + 1, startRow); li <= endRow; li++)
+      html += buildOneTableRow(idx, getRi(li), li, tbl, allParamMap, dupRowIdxs);
+    botSpacer.insertAdjacentHTML('beforebegin', html);
+  }
+
+  // ── Обновить спейсеры ───────────────────────────────────────────────
+  const topH = startRow * VIRT_ROW_H;
+  const botH = Math.max(0, total - 1 - endRow) * VIRT_ROW_H;
+  topSpacer.firstElementChild.style.height = topH + 'px';
+  botSpacer.firstElementChild.style.height = botH + 'px';
+  topSpacer.dataset.end   = startRow;
+  botSpacer.dataset.start = endRow;
+}
+
+// =====================================================================
+// DROPDOWN-ФИЛЬТР CoefTable (Excel-style)
+// =====================================================================
+const _coefFilterState = {}; // idx → { [ci]: Set<string> }
+let   _cfDd        = null;   // dropdown DOM-элемент
+let   _cfDdCurrent = null;   // { idx, ci }
+
+function _ensureCfDropdown() {
+  if (_cfDd) return;
+  _cfDd = document.createElement('div');
+  _cfDd.className = 'cf-dropdown';
+  _cfDd.innerHTML =
+    `<div class="cf-dd-search"><input id="cf-dd-search" type="text" placeholder="Поиск значений…" oninput="cfDdSearch(this.value)" autocomplete="off"></div>` +
+    `<div class="cf-dd-actions"><button class="cf-dd-link" onclick="cfDdSelectAll()">Выбрать все</button><button class="cf-dd-link" onclick="cfDdClearSel()">Снять все</button></div>` +
+    `<div class="cf-dd-list" id="cf-dd-list"></div>` +
+    `<div class="cf-dd-footer"><button class="btn-primary btn-sm" onclick="cfDdApply()">Применить</button><button class="btn-ghost btn-sm" onclick="cfDdClose()">Отмена</button></div>`;
+  document.body.appendChild(_cfDd);
+  // Закрыть при клике вне
+  document.addEventListener('mousedown', e => {
+    if (_cfDd.style.display !== 'none' && !_cfDd.contains(e.target) && !e.target.closest('.col-filter-btn'))
+      cfDdClose();
+  }, true);
+}
+
+function openCoefFilter(idx, ci, anchorEl) {
+  _ensureCfDropdown();
+  // Toggle: повторный клик по тому же столбцу — закрыть
+  if (_cfDdCurrent && _cfDdCurrent.idx === idx && _cfDdCurrent.ci === ci && _cfDd.style.display !== 'none') {
+    cfDdClose(); return;
+  }
+  _cfDdCurrent = { idx, ci };
+
+  const tbl      = coefTables[idx];
+  const keyCode  = ci < tbl.keys.length ? tbl.keys[ci] : null;
+  const isListCol = keyCode && getAllParamMap().get(keyCode) === 'List';
+
+  // Список значений для чекбоксов
+  let values;
+  if (isListCol) {
+    // List-параметр: все варианты из определения + всегда «—» (пустое значение).
+    values = ['', ...getListValuesForCode(keyCode)];
+  } else {
+    // Не-List: уникальные значения из реальных данных
+    const seen = new Set();
+    tbl.rows.forEach(r => { seen.add((r[ci] ?? '').toString().trim()); });
+    values = [...seen].sort((a, b) => {
+      if (a === '') return -1; if (b === '') return 1;
+      const na = parseFloat(a), nb = parseFloat(b);
+      return (!isNaN(na) && !isNaN(nb)) ? na - nb : a.localeCompare(b, 'ru');
+    });
+    if (values.length > 500) values = values.slice(0, 500);
+  }
+
+  // Текущий выбор
+  const curSel = (_coefFilterState[idx] && _coefFilterState[idx][ci]) || new Set();
+
+  // Заполнить список (пустое значение показываем как «—»)
+  const listEl = document.getElementById('cf-dd-list');
+  listEl.innerHTML = values.map(v =>
+    `<label class="cf-dd-item"><input type="checkbox" value="${esc(v)}"${curSel.has(v) ? ' checked' : ''}><span>${v === '' ? '—' : esc(v)}</span></label>`
+  ).join('');
+  document.getElementById('cf-dd-search').value = '';
+
+  // Показать и позиционировать
+  _cfDd.style.display = 'block';
+  const rect = anchorEl.getBoundingClientRect();
+  const ddW  = _cfDd.offsetWidth  || 220;
+  const ddH  = _cfDd.offsetHeight || 300;
+  let left = rect.left;
+  let top  = rect.bottom + 4;
+  if (left + ddW > window.innerWidth  - 8) left = window.innerWidth  - ddW - 8;
+  if (top  + ddH > window.innerHeight - 8) top  = rect.top - ddH - 4;
+  _cfDd.style.left = Math.max(4, left) + 'px';
+  _cfDd.style.top  = Math.max(4, top)  + 'px';
+}
+
+function cfDdSearch(q) {
+  const lq = q.toLowerCase();
+  document.querySelectorAll('#cf-dd-list .cf-dd-item').forEach(el => {
+    el.style.display = el.querySelector('span').textContent.toLowerCase().includes(lq) ? '' : 'none';
+  });
+}
+function cfDdSelectAll() {
+  document.querySelectorAll('#cf-dd-list .cf-dd-item').forEach(el => {
+    if (el.style.display !== 'none') el.querySelector('input').checked = true;
+  });
+}
+function cfDdClearSel() {
+  document.querySelectorAll('#cf-dd-list .cf-dd-item input').forEach(cb => cb.checked = false);
+}
+
+function cfDdApply() {
+  if (!_cfDdCurrent) return;
+  const { idx, ci } = _cfDdCurrent;
+  const checked = [...document.querySelectorAll('#cf-dd-list .cf-dd-item input:checked')].map(cb => cb.value);
+  if (!_coefFilterState[idx]) _coefFilterState[idx] = {};
+  if (checked.length) _coefFilterState[idx][ci] = new Set(checked.map(v => v.trim()));
+  else                delete _coefFilterState[idx][ci];
+  cfDdClose();
+  applyCoefFilter(idx);
+}
+
+function cfDdClose() {
+  if (_cfDd) _cfDd.style.display = 'none';
+  _cfDdCurrent = null;
+}
+
+// Обновить подсветку кнопок ▾
+function _updateFilterBtnStates(idx) {
+  const tbl = coefTables[idx];
+  if (!tbl) return;
+  for (let ci = 0; ci <= tbl.keys.length; ci++) {
+    const btn = document.getElementById(`col-filter-btn-${idx}-${ci}`);
+    if (btn) btn.classList.toggle('active', !!(_coefFilterState[idx]?.[ci]?.size));
+  }
+  const clearBtn = document.getElementById(`coef-clear-${idx}`);
+  const hasAny = _coefFilterState[idx] && Object.values(_coefFilterState[idx]).some(s => s.size);
+  if (clearBtn) clearBtn.style.display = hasAny ? '' : 'none';
+}
+
+// Восстановить virtual scroll
+function _restoreVirtual(idx) {
+  const tbl   = coefTables[idx];
+  const tbody = document.getElementById(`coef-tbody-${idx}`);
+  const state = _tableVirtState[idx];
+  if (!tbl || !tbody || !state) return;
+  state.filteredRows = null;
+  const colCount = tbl.keys.length + 3;
+  const total    = tbl.rows.length;
+  const initEnd  = Math.min(total - 1, VIRT_WINDOW - 1);
+  tbody.innerHTML =
+    `<tr id="vsp-top-${idx}" class="virt-spacer" data-end="0"><td colspan="${colCount}" style="height:0;padding:0;border:none"></td></tr>` +
+    `<tr id="vsp-bot-${idx}" class="virt-spacer" data-start="${initEnd}"><td colspan="${colCount}" style="height:${Math.max(0,total-VIRT_WINDOW)*VIRT_ROW_H}px;padding:0;border:none"></td></tr>`;
+  const allParamMap = getAllParamMap();
+  const dupRowIdxs  = calcDupRowIdxs(tbl);
+  let html = '';
+  for (let ri = 0; ri <= initEnd; ri++) html += buildOneTableRow(idx, ri, ri, tbl, allParamMap, dupRowIdxs);
+  document.getElementById(`vsp-top-${idx}`).insertAdjacentHTML('afterend', html);
+  requestAnimationFrame(() => updateTableVirt(idx));
+}
+
+function applyCoefFilter(idx) {
+  const tbl      = coefTables[idx];
+  const tbody    = document.getElementById(`coef-tbody-${idx}`);
+  const countEl  = document.getElementById(`coef-count-${idx}`);
+  if (!tbl || !tbody) return;
+
+  const colFilters = _coefFilterState[idx] || {};
+  const active = Object.values(colFilters).some(s => s && s.size > 0);
+  _updateFilterBtnStates(idx);
+
+  // Функция проверки строки: AND по столбцам, OR по значениям внутри столбца.
+  // Только точное совпадение. trim() с обеих сторон — защита от лишних пробелов в данных.
+  const rowOk = row => Object.entries(colFilters).every(([ci, vals]) => {
+    if (!vals || !vals.size) return true;
+    const cell = (row[+ci] ?? '').toString().trim();
+    return vals.has(cell);
+  });
+
+  const state = _tableVirtState[idx];
+  if (state) {
+    if (active) {
+      // Собираем совпадения O(n) — без HTML-рендера
+      const matching = [];
+      tbl.rows.forEach((row, ri) => { if (rowOk(row)) matching.push(ri); });
+      state.filteredRows = matching;
+
+      // Рендерим только первое окно + спейсеры (виртуальный скролл для фильтра)
+      const total   = matching.length;
+      const colCount = tbl.keys.length + 3;
+      if (total === 0) {
+        tbody.innerHTML = '';
+        if (countEl) countEl.textContent = `0 / ${tbl.rows.length}`;
+        _updateFilterBtnStates(idx);
+        return;
+      }
+      const initEnd = Math.min(total - 1, VIRT_WINDOW - 1);
+      const botH    = Math.max(0, total - VIRT_WINDOW) * VIRT_ROW_H;
+      const allParamMap = getAllParamMap();
+      const dupRowIdxs  = calcDupRowIdxs(tbl);
+      let html = '';
+      for (let li = 0; li <= initEnd; li++)
+        html += buildOneTableRow(idx, matching[li], li, tbl, allParamMap, dupRowIdxs);
+      tbody.innerHTML =
+        `<tr id="vsp-top-${idx}" class="virt-spacer" data-end="0"><td colspan="${colCount}" style="height:0;padding:0;border:none"></td></tr>` +
+        html +
+        `<tr id="vsp-bot-${idx}" class="virt-spacer" data-start="${initEnd}"><td colspan="${colCount}" style="height:${botH}px;padding:0;border:none"></td></tr>`;
+      if (countEl) countEl.textContent = `${total} / ${tbl.rows.length}`;
+      requestAnimationFrame(() => updateTableVirt(idx));
+    } else {
+      if (countEl) countEl.textContent = tbl.rows.length;
+      _restoreVirtual(idx);
+    }
+  } else {
+    // Маленькая таблица — show/hide
+    let visible = 0;
+    Array.from(tbody.children).forEach(tr => {
+      if (!tr.dataset.ri) return;
+      const match = !active || rowOk(tbl.rows[parseInt(tr.dataset.ri)]);
+      tr.style.display = match ? '' : 'none';
+      if (match) visible++;
+    });
+    if (countEl) countEl.textContent = active ? `${visible} / ${tbl.rows.length}` : tbl.rows.length;
+  }
+}
+
+// Кнопка «✕» — сбросить все фильтры таблицы
+function clearCoefFilter(idx) {
+  delete _coefFilterState[idx];
+  cfDdClose();
+  applyCoefFilter(idx);
 }
 
 function togglePanel() {
@@ -1104,6 +1487,7 @@ function togglePanel() {
   applyLayout();
   document.getElementById('btnTogglePanel').textContent = panelVisible ? 'Скрыть код' : 'Показать код';
   document.getElementById('btnTogglePanel').classList.toggle('active', panelVisible);
+  if (panelVisible) onPanelShow();
 }
 
 function setPanelPos(pos) {
@@ -1112,6 +1496,7 @@ function setPanelPos(pos) {
     panelVisible = true;
     document.getElementById('btnTogglePanel').textContent = 'Скрыть код';
     document.getElementById('btnTogglePanel').classList.add('active');
+    onPanelShow();
   }
   applyLayout();
   document.getElementById('cpBtnBottom').classList.toggle('active-pos', pos === 'bottom');

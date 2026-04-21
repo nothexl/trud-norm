@@ -1,13 +1,30 @@
+let _genDirty = false; // данные изменились пока панель была скрыта
+
 function scheduleGen(immediate) {
   if (genTimer) { clearTimeout(genTimer); genTimer = null; }
+  if (!panelVisible) {
+    // Панель скрыта — откладываем тяжёлую генерацию, только помечаем dirty
+    _genDirty = true;
+    refreshEditorErrors();
+    renderSidebar(); // обновляем ⚠ значки в сайдбаре
+    return;
+  }
   immediate ? doGenerate() : (genTimer = setTimeout(doGenerate, 400));
 }
 
 function doGenerate() {
   generateCode();
+  _genDirty = false;
   renderValidationBanner();
   refreshEditorErrors();
   renderSidebar(); // refresh ⚠ badges
+}
+
+// Вызывается при открытии панели кода — генерируем если данные изменились
+function onPanelShow() {
+  if (_genDirty) {
+    doGenerate();
+  }
 }
 
 function generateCode() {
@@ -238,6 +255,8 @@ function toWin1251(str) {
 }
 
 function saveScript() {
+  // Если панель кода была скрыта и генерация не запускалась — делаем её сейчас
+  if (_genDirty) doGenerate();
   const code = document.getElementById('codeOutput').value;
   if (!code) { alert('Нет данных для сохранения'); return; }
   if (document.getElementById('validIndicator').style.display !== 'none') {

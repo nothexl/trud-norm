@@ -116,6 +116,7 @@ function renderSidebarTables() {
 }
 
 function renderEditor() {
+  cleanupTableVirt(); // снять scroll-listener перед любым перерендером
   const editor = document.getElementById('editor');
   if (!sel) {
     editor.innerHTML = '<div class="empty-state"><div class="icon">📄</div><p style="color:#aaa">Выберите тип или операцию</p></div>';
@@ -123,6 +124,40 @@ function renderEditor() {
   }
   if (sel.kind === 'table') { renderTableEditor(sel.idx); return; }
   sel.kind === 'type' ? renderTypeEditor(sel.ti) : renderOpEditor(sel.ti, sel.oi);
+}
+
+// ---------- Строка CoefTable: одиночный HTML-билдер ----------
+function buildOneTableRow(idx, ri, li, tbl, allParamMap, dupRowIdxs) {
+  const row = tbl.rows[ri];
+  const isDupRow = dupRowIdxs.has(ri);
+  const grip = `<td class="col-ctl"><span class="param-grip" title="Перетащить" onmousedown="rowGripMouseDown()">⠿</span></td>`;
+  const cells = tbl.keys.map((k, ci) => {
+    if (allParamMap.get(k) === 'List') {
+      const opts = getListValuesForCode(k);
+      const cur = row[ci] || '';
+      const opts2 = `<option value="">—</option>` + opts.map(v => `<option value="${esc(v)}"${cur===v?' selected':''}>${esc(v)}</option>`).join('');
+      return `<td><select onchange="updateTableCell(${idx},${ri},${ci},this.value)">${opts2}</select></td>`;
+    }
+    return `<td><input type="text" value="${esc(row[ci]||'')}" oninput="updateTableCell(${idx},${ri},${ci},this.value)" placeholder="${esc(k)}"></td>`;
+  }).join('');
+  const val  = `<td class="value-cell"><input type="number" step="any" value="${esc(row[tbl.keys.length]||'')}" oninput="updateTableCell(${idx},${ri},${tbl.keys.length},this.value)" placeholder="0"></td>`;
+  const del  = `<td><button class="tbl-btn del-btn" onclick="removeTableRow(${idx},${ri})" title="Удалить строку">✕</button></td>`;
+  const rt   = row.map(c=>(c||'').toLowerCase()).join(' ');
+  return `<tr class="${isDupRow?'dup-row':''}" data-ri="${ri}" data-li="${li}" data-row-text="${esc(rt)}" draggable="true"
+    ondragstart="rowDragStart(event,${idx},${ri})" ondragover="rowDragOver(event,${ri})"
+    ondragleave="rowDragLeave(event)" ondrop="rowDrop(event,${idx},${ri})" ondragend="rowDragEnd(event)"
+    >${grip}${cells}${val}${del}</tr>`;
+}
+
+// Вычислить Set дублей строк для таблицы
+function calcDupRowIdxs(tbl) {
+  const seen = new Map(), dups = new Set();
+  tbl.rows.forEach((row, ri) => {
+    const combo = row.slice(0, tbl.keys.length).join('\x00');
+    if (combo.trim().replace(/\x00/g,'') === '') return;
+    if (seen.has(combo)) { dups.add(ri); dups.add(seen.get(combo)); } else seen.set(combo, ri);
+  });
+  return dups;
 }
 
 function renderTypeEditor(ti) {
@@ -274,6 +309,10 @@ function renderOpEditor(ti, oi) {
     ${renderOpProtocolSection(ti, oi)}`;
 }
 
+// Состояние свёрнутости групп чипсов (сохраняется на сессию)
+// Proxy: неизвестный ключ → true (свёрнуто по умолчанию)
+const _chipGroupCollapsed = new Proxy({}, { get: (o, k) => k in o ? o[k] : true });
+
 function buildPlaceholderChipsHTML(ti, oi) {
   const type = schema[ti];
   const op = type.operations[oi];
@@ -282,18 +321,64 @@ function buildPlaceholderChipsHTML(ti, oi) {
   type.paramSets.forEach(ps => ps.params.forEach(p => { if (p.code && !excludedTypes.has(p.type)) paramCodes.add(p.code); }));
   op.params.forEach(p => { if (p.code && !excludedTypes.has(p.type)) paramCodes.add(p.code); });
   const otherOps = type.operations.filter((o, i) => i !== oi && o.code);
-  const chip = (text, cls, label) =>
-    `<button class="formula-chip${cls ? ' ' + cls : ''}" onmousedown="event.preventDefault()" onclick="insertAtActive('${text}')">${label}</button>`;
-  const paramChips = [...paramCodes].map(c => chip(`{p.${c}}`, '', c)).join('');
-  const opChips = otherOps.map(o => chip(`{op.${esc(o.code)}}`, 'op-ref', esc(o.code))).join('');
-  const tableChips = coefTables.filter(t => t.code).map(t => chip(`{K.${esc(t.code)}}`, 'coef-ref', esc(t.code))).join('');
-  const universalPart = [
-    paramCodes.size > 0 ? `<span class="chip-label">Параметры:</span>${paramChips}` : '',
-    coefTables.filter(t => t.code).length > 0 ? `<span class="chip-label">Таблицы:</span>${tableChips}` : '',
-    otherOps.length > 0 ? `<span class="chip-label">Операции:</span>${opChips}` : '',
-  ].filter(Boolean).join('');
-  const protoOnlyPart = `${universalPart ? '<span class="chip-sep"></span>' : ''}<span class="chip-label">Только в протоколе:</span>${chip('{NAME}', 'special', 'NAME')}${chip('{SHTS}', 'special', 'SHTS')}${chip('{PROF}', 'special', 'PROF')}${chip('{VALUE}', 'special', 'VALUE')}`;
-  return (universalPart || '') + protoOnlyPart;
+  // searchText — отдельный текст для поиска (если отличается от label)
+  const chip = (text, cls, label, searchText) =>
+    `<button class="formula-chip${cls ? ' ' + cls : ''}" onmousedown="event.preventDefault()" onclick="insertAtActive('${text}')" data-chip-text="${esc((searchText || label).toLowerCase())}">${label}</button>`;
+
+  const paramChips   = [...paramCodes].map(c => chip(`{p.${c}}`, '', c)).join('');
+  const opChips      = otherOps.map(o => chip(`{op.${esc(o.code)}}`, 'op-ref', esc(o.code))).join('');
+  const tableChips   = coefTables.filter(t => t.code).map(t => chip(`{K.${esc(t.code)}}`, 'coef-ref', esc(t.code))).join('');
+  const protoChips   = chip('{NAME}','special','NAME') + chip('{SHTS}','special','SHTS') + chip('{PROF}','special','PROF') + chip('{VALUE}','special','VALUE');
+
+  // Подгруппы «Параметры других операций»: по одной подгруппе на операцию
+  const popGroupsHtml = otherOps.map(o => {
+    const popParams = o.params.filter(p => p.code && !excludedTypes.has(p.type));
+    if (!popParams.length) return '';
+    const popChips = popParams.map(p =>
+      chip(`{pop.${esc(o.code)}.${esc(p.code)}}`, 'pop-ref', esc(p.code), `${o.code} ${p.code}`)
+    ).join('');
+    const subId = `pop_${o.code}`;
+    const subCollapsed = _chipGroupCollapsed[subId];
+    return `<div class="chip-group chip-subgroup" id="chipgrp-${subId}">
+      <button class="chip-group-toggle" onmousedown="event.preventDefault()" onclick="toggleChipGroup('${subId}')">
+        <span class="chip-group-arrow">${subCollapsed ? '▶' : '▼'}</span>
+        <span>[${esc(o.code)}]${o.name ? ` ${esc(o.name)}` : ''}</span><span class="chip-group-count">${popParams.length}</span>
+      </button>
+      <div class="chip-group-body${subCollapsed ? ' chip-group-hidden' : ''}">${popChips}</div>
+    </div>`;
+  }).join('');
+  const popTotalCount = otherOps.reduce(
+    (sum, o) => sum + o.params.filter(p => p.code && !excludedTypes.has(p.type)).length, 0
+  );
+
+  const makeGroup = (id, label, chips, count, hasSubgroups = false) => {
+    if (!count) return '';
+    const collapsed = _chipGroupCollapsed[id];
+    return `<div class="chip-group" id="chipgrp-${id}">
+      <button class="chip-group-toggle" onmousedown="event.preventDefault()" onclick="toggleChipGroup('${id}')">
+        <span class="chip-group-arrow">${collapsed ? '▶' : '▼'}</span>
+        <span>${label}</span><span class="chip-group-count">${count}</span>
+      </button>
+      <div class="chip-group-body${collapsed ? ' chip-group-hidden' : ''}${hasSubgroups ? ' chip-group-subgroups' : ''}">${chips}</div>
+    </div>`;
+  };
+
+  const searchBar = `<div class="chip-search-bar">
+    <div class="chip-search-wrap">
+      <span class="chip-search-icon">🔍</span>
+      <input class="chip-search-input" type="text" placeholder="Поиск"
+        oninput="filterChips(this.value)" onmousedown="event.stopPropagation()">
+    </div>
+  </div>`;
+
+  return `<div class="chip-groups-wrap" id="chip-groups-root">
+    ${searchBar}
+    ${makeGroup('params',  'Параметры этой операции',         paramChips,    paramCodes.size)}
+    ${makeGroup('pop',     'Параметры других операций',       popGroupsHtml, popTotalCount, true)}
+    ${makeGroup('ops',     'Результат других операций',       opChips,       otherOps.length)}
+    ${makeGroup('tables',  'Таблицы коэффициентов',           tableChips,    coefTables.filter(t=>t.code).length)}
+    ${makeGroup('proto',   'Значения для протокола',          protoChips,    4)}
+  </div>`;
 }
 
 function refreshFormulaChips(ti, oi) {
@@ -406,7 +491,7 @@ function renderPlaceholderHints(ti, oi) {
   return `<div class="section">
     <div class="section-title"><span class="stitle">Вставка значений</span></div>
     <div class="section-body">
-      <div class="formula-chips" id="fld-ph-chips" style="margin-bottom:10px">
+      <div class="formula-chips" id="fld-ph-chips">
         ${buildPlaceholderChipsHTML(ti, oi)}
       </div>
       <div class="ph-hint">
@@ -762,50 +847,54 @@ function renderTableEditor(idx) {
       <div id="tbl-key-dup-${idx}">${dupKeys.size > 0 ? `<div style="color:#e53e3e;font-size:11px;margin-top:4px">⚠ Дублирующиеся ключи: ${[...dupKeys].map(k => `<b>${esc(k)}</b>`).join(', ')}</div>` : ''}</div>
       </div>`;
 
-  // Duplicate row detection (exact match on key combination)
-  const seenRowKeys = new Map(); // keyCombo → first ri
-  const dupRowIdxs = new Set();
-  tbl.rows.forEach((row, ri) => {
-    const combo = row.slice(0, tbl.keys.length).join('\x00');
-    if (combo.trim().replace(/\x00/g,'') === '') return; // skip fully empty rows
-    if (seenRowKeys.has(combo)) { dupRowIdxs.add(ri); dupRowIdxs.add(seenRowKeys.get(combo)); }
-    else seenRowKeys.set(combo, ri);
-  });
+  // Дубли строк
+  const dupRowIdxs = calcDupRowIdxs(tbl);
 
   // Values table
   const hasKeys = tbl.keys.length > 0;
   let tableHtml = '';
   if (hasKeys) {
-    const headCells = '<th class="col-ctl"></th>' + tbl.keys.map(k => `<th>${esc(k) || '?'}</th>`).join('') + '<th class="value-col">Значение</th><th></th>';
-    const bodyRows = tbl.rows.map((row, ri) => {
-      const isDupRow = dupRowIdxs.has(ri);
-      const gripCell = `<td class="col-ctl"><span class="param-grip" title="Перетащить" onmousedown="rowGripMouseDown()">⠿</span></td>`;
-      const cells = tbl.keys.map((k, ci) => {
-        if (allParamMap.get(k) === 'List') {
-          const opts = getListValuesForCode(k);
-          const cur = row[ci] || '';
-          const options = `<option value="">—</option>` +
-            opts.map(v => `<option value="${esc(v)}"${cur === v ? ' selected' : ''}>${esc(v)}</option>`).join('');
-          return `<td><select onchange="updateTableCell(${idx},${ri},${ci},this.value)">${options}</select></td>`;
-        }
-        return `<td><input type="text" value="${esc(row[ci] || '')}" oninput="updateTableCell(${idx},${ri},${ci},this.value)" placeholder="${esc(k)}"></td>`;
-      }).join('');
-      const valCell = `<td class="value-cell"><input type="text" value="${esc(row[tbl.keys.length] || '')}" oninput="updateTableCell(${idx},${ri},${tbl.keys.length},this.value)" placeholder="значение"></td>`;
-      const delCell = `<td><button class="tbl-btn del-btn" onclick="removeTableRow(${idx},${ri})" title="Удалить строку">✕</button></td>`;
-      return `<tr class="${isDupRow ? 'dup-row' : ''}" draggable="true"
-        ondragstart="rowDragStart(event,${idx},${ri})"
-        ondragover="rowDragOver(event,${ri})"
-        ondragleave="rowDragLeave(event)"
-        ondrop="rowDrop(event,${idx},${ri})"
-        ondragend="rowDragEnd(event)">${gripCell}${cells}${valCell}${delCell}</tr>`;
-    }).join('');
+    const colCount = tbl.keys.length + 3; // col-ctl + keys + value + del
+
+    const headCells =
+      `<th class="col-ctl"></th>` +
+      tbl.keys.map((k, ci) =>
+        `<th><div class="col-hdr-wrap">` +
+          `<span class="col-hdr-name">${esc(k)||'?'}</span>` +
+          `<button class="col-filter-btn" id="col-filter-btn-${idx}-${ci}" onclick="openCoefFilter(${idx},${ci},this)" title="Фильтр">▾</button>` +
+        `</div></th>`
+      ).join('') +
+      `<th class="value-col"><div class="col-hdr-wrap">` +
+        `<span class="col-hdr-name">Значение</span>` +
+        `<button class="col-filter-btn" id="col-filter-btn-${idx}-${tbl.keys.length}" onclick="openCoefFilter(${idx},${tbl.keys.length},this)" title="Фильтр">▾</button>` +
+      `</div></th>` +
+      `<th></th>`;
+
+    const rowCount = tbl.rows.length;
+    const useVirt = rowCount > VIRT_THRESHOLD;
+
+    // Строим начальное тело: при виртуальном режиме — первые VIRT_WINDOW строк + спейсеры
+    let bodyRows;
+    if (useVirt) {
+      const initEnd = Math.min(rowCount - 1, VIRT_WINDOW - 1);
+      let rows = '';
+      for (let ri = 0; ri <= initEnd; ri++) rows += buildOneTableRow(idx, ri, ri, tbl, allParamMap, dupRowIdxs);
+      const botH = Math.max(0, rowCount - VIRT_WINDOW) * VIRT_ROW_H;
+      bodyRows =
+        `<tr id="vsp-top-${idx}" class="virt-spacer" data-end="0"><td colspan="${colCount}" style="height:0;padding:0;border:none"></td></tr>` +
+        rows +
+        `<tr id="vsp-bot-${idx}" class="virt-spacer" data-start="${initEnd}"><td colspan="${colCount}" style="height:${botH}px;padding:0;border:none"></td></tr>`;
+    } else {
+      bodyRows = tbl.rows.map((_, ri) => buildOneTableRow(idx, ri, ri, tbl, allParamMap, dupRowIdxs)).join('');
+    }
+
     const dupWarning = dupRowIdxs.size > 0
-      ? `<div class="dup-rows-warn">⚠ Есть строки с одинаковыми ключами (строки ${[...dupRowIdxs].sort((a,b)=>a-b).map(i=>i+1).join(', ')}). При поиске вернётся первая совпавшая.</div>`
+      ? `<div class="dup-rows-warn">⚠ Строки с одинаковыми ключами: ${[...dupRowIdxs].sort((a,b)=>a-b).map(i=>i+1).join(', ')}. При поиске вернётся первая совпавшая.</div>`
       : '';
-    tableHtml = `<div id="coef-dup-${idx}">${dupWarning}</div><div class="coef-table-wrap"><table class="coef-table">
+    tableHtml = `<div id="coef-dup-${idx}">${dupWarning}</div><div id="coef-scroll-${idx}" class="coef-table-scroll"><div class="coef-table-wrap"><table class="coef-table">
       <thead><tr>${headCells}</tr></thead>
       <tbody id="coef-tbody-${idx}">${bodyRows}</tbody>
-    </table></div>`;
+    </table></div></div>`;
   }
 
   const dupCode = tbl.code && coefTables.filter(t => t.code === tbl.code).length > 1;
@@ -841,7 +930,8 @@ function renderTableEditor(idx) {
     </div>
     <div class="section">
       <div class="section-title">
-        <span class="stitle">Значения <span class="tag">${tbl.rows.length}</span></span>
+        <span class="stitle">Значения <span class="tag" id="coef-count-${idx}">${tbl.rows.length}</span></span>
+        <button id="coef-clear-${idx}" class="btn-ghost btn-sm" onclick="clearCoefFilter(${idx})" style="display:none">✕ Сбросить фильтры</button>
         ${hasKeys ? `<button class="btn-primary btn-sm" onclick="addTableRow(${idx})">+ Строка</button>` : ''}
       </div>
       <div class="section-body">
@@ -857,6 +947,12 @@ function renderTableEditor(idx) {
         </div>${tableHtml}` : '<div style="color:#bbb;font-size:12px">Сначала добавьте ключи</div>'}
       </div>
     </div>`;
+
+  // Запускаем виртуальный скролл если нужно
+  const rowCount2 = tbl.rows.length;
+  if (hasKeys && rowCount2 > VIRT_THRESHOLD) {
+    setupTableVirt(idx);
+  }
 }
 
 function renderDefaultCell(scope, ti, oi, pi, p) {

@@ -129,6 +129,15 @@ function renderValidationBanner() {
         if (ph.startsWith('p.')) { if (!typeParamCodes.has(ph.slice(2))) errors.push(`${context}: неизвестный параметр <b>{${esc(ph)}}</b>`); }
         else if (ph.startsWith('op.')) { if (!opCodes.has(ph.slice(3))) errors.push(`${context}: неизвестная операция <b>{${esc(ph)}}</b>`); }
         else if (ph.startsWith('K.')) { if (!tableCodes.has(ph.slice(2))) errors.push(`${context}: неизвестная таблица <b>{${esc(ph)}}</b>`); }
+        else if (ph.startsWith('pop.')) {
+          const parts = ph.slice(4).split('.');
+          if (parts.length !== 2) { errors.push(`${context}: некорректный формат <b>{${esc(ph)}}</b> (ожидается pop.КОД_ОП.КОД_ПАРАМ)`); }
+          else {
+            const refOp = type.operations.find(o => o.code === parts[0]);
+            if (!refOp) errors.push(`${context}: неизвестная операция <b>${esc(parts[0])}</b> в <b>{${esc(ph)}}</b>`);
+            else if (!refOp.params.some(p => p.code === parts[1])) errors.push(`${context}: у операции <b>${esc(parts[0])}</b> нет параметра <b>${esc(parts[1])}</b>`);
+          }
+        }
         else errors.push(`${context}: неизвестный плейсхолдер <b>{${esc(ph)}}</b>`);
       });
     };
@@ -152,6 +161,15 @@ function renderValidationBanner() {
           if (ph.startsWith('p.')) { if (!allParamCodes.has(ph.slice(2))) errors.push(`${ctx}: неизвестный параметр <b>{${esc(ph)}}</b>`); }
           else if (ph.startsWith('op.')) { if (!opCodes.has(ph.slice(3))) errors.push(`${ctx}: неизвестная операция <b>{${esc(ph)}}</b>`); }
           else if (ph.startsWith('K.')) { if (!tableCodes.has(ph.slice(2))) errors.push(`${ctx}: неизвестная таблица <b>{${esc(ph)}}</b>`); }
+          else if (ph.startsWith('pop.')) {
+            const parts = ph.slice(4).split('.');
+            if (parts.length !== 2) { errors.push(`${ctx}: некорректный формат <b>{${esc(ph)}}</b> (ожидается pop.КОД_ОП.КОД_ПАРАМ)`); }
+            else {
+              const refOp = type.operations.find(o => o.code === parts[0]);
+              if (!refOp) errors.push(`${ctx}: неизвестная операция <b>${esc(parts[0])}</b> в <b>{${esc(ph)}}</b>`);
+              else if (!refOp.params.some(p => p.code === parts[1])) errors.push(`${ctx}: у операции <b>${esc(parts[0])}</b> нет параметра <b>${esc(parts[1])}</b>`);
+            }
+          }
           else errors.push(`${ctx}: неизвестный плейсхолдер <b>{${esc(ph)}}</b>`);
         });
       };
