@@ -115,6 +115,28 @@ function renderValidationBanner() {
 
   // Formula and protocol placeholder validation
   const tableCodes = new Set(coefTables.map(t => t.code).filter(Boolean));
+
+  // Валидация плейсхолдера {K.TableCode} или {K.TableCode|KEY1=PARAM1,KEY2=PARAM2}
+  const checkKPlaceholder = (ph, ctx, tblCodes, paramCodes, errs) => {
+    const raw = ph.slice(2); // всё после "K."
+    const pipeIdx = raw.indexOf('|');
+    const tableCode = pipeIdx >= 0 ? raw.slice(0, pipeIdx) : raw;
+    const overridePart = pipeIdx >= 0 ? raw.slice(pipeIdx + 1) : '';
+    if (!tblCodes.has(tableCode)) {
+      errs.push(`${ctx}: неизвестная таблица <b>{K.${esc(tableCode)}}</b>`);
+      return;
+    }
+    if (!overridePart) return;
+    const tbl = coefTables.find(t => t.code === tableCode);
+    overridePart.split(',').forEach(ov => {
+      const eqIdx = ov.indexOf('=');
+      if (eqIdx < 0) { errs.push(`${ctx}: некорректный формат переопределения ключа <b>${esc(ov)}</b> в <b>{${esc(ph)}}</b>`); return; }
+      const key = ov.slice(0, eqIdx).trim();
+      const paramCode = ov.slice(eqIdx + 1).trim();
+      if (tbl && !tbl.keys.includes(key)) errs.push(`${ctx}: ключ <b>${esc(key)}</b> не найден в таблице <b>${esc(tableCode)}</b>`);
+      if (!paramCodes.has(paramCode)) errs.push(`${ctx}: параметр-замена <b>${esc(paramCode)}</b> не существует в <b>{${esc(ph)}}</b>`);
+    });
+  };
   schema.forEach((type, ti) => {
     const typeParamCodes = new Set();
     type.paramSets.forEach(ps => ps.params.forEach(p => { if (p.code) typeParamCodes.add(p.code); }));
@@ -128,7 +150,7 @@ function renderValidationBanner() {
         if (builtins.has(ph)) return;
         if (ph.startsWith('p.')) { if (!typeParamCodes.has(ph.slice(2))) errors.push(`${context}: неизвестный параметр <b>{${esc(ph)}}</b>`); }
         else if (ph.startsWith('op.')) { if (!opCodes.has(ph.slice(3))) errors.push(`${context}: неизвестная операция <b>{${esc(ph)}}</b>`); }
-        else if (ph.startsWith('K.')) { if (!tableCodes.has(ph.slice(2))) errors.push(`${context}: неизвестная таблица <b>{${esc(ph)}}</b>`); }
+        else if (ph.startsWith('K.')) { checkKPlaceholder(ph, context, tableCodes, typeParamCodes, errors); }
         else if (ph.startsWith('pop.')) {
           const parts = ph.slice(4).split('.');
           if (parts.length !== 2) { errors.push(`${context}: некорректный формат <b>{${esc(ph)}}</b> (ожидается pop.КОД_ОП.КОД_ПАРАМ)`); }
@@ -160,7 +182,7 @@ function renderValidationBanner() {
           if (builtins.has(ph)) return;
           if (ph.startsWith('p.')) { if (!allParamCodes.has(ph.slice(2))) errors.push(`${ctx}: неизвестный параметр <b>{${esc(ph)}}</b>`); }
           else if (ph.startsWith('op.')) { if (!opCodes.has(ph.slice(3))) errors.push(`${ctx}: неизвестная операция <b>{${esc(ph)}}</b>`); }
-          else if (ph.startsWith('K.')) { if (!tableCodes.has(ph.slice(2))) errors.push(`${ctx}: неизвестная таблица <b>{${esc(ph)}}</b>`); }
+          else if (ph.startsWith('K.')) { checkKPlaceholder(ph, ctx, tableCodes, allParamCodes, errors); }
           else if (ph.startsWith('pop.')) {
             const parts = ph.slice(4).split('.');
             if (parts.length !== 2) { errors.push(`${ctx}: некорректный формат <b>{${esc(ph)}}</b> (ожидается pop.КОД_ОП.КОД_ПАРАМ)`); }

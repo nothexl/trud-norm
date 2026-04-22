@@ -373,7 +373,7 @@ function buildPlaceholderChipsHTML(ti, oi) {
 
   return `<div class="chip-groups-wrap" id="chip-groups-root">
     ${searchBar}
-    ${makeGroup('params',  'Параметры этой операции',         paramChips,    paramCodes.size)}
+    ${makeGroup('params',  'Параметры',                       paramChips,    paramCodes.size)}
     ${makeGroup('pop',     'Параметры других операций',       popGroupsHtml, popTotalCount, true)}
     ${makeGroup('ops',     'Результат других операций',       opChips,       otherOps.length)}
     ${makeGroup('tables',  'Таблицы коэффициентов',           tableChips,    coefTables.filter(t=>t.code).length)}
@@ -497,8 +497,10 @@ function renderPlaceholderHints(ti, oi) {
       <div class="ph-hint">
         <div class="ph-grid">
           <code>{p.КОД}</code><span>значение параметра с указанным кодом</span>
-          <code>{K.КОД}</code><span>значение из таблицы коэффициентов</span>
           <code>{op.КОД}</code><span>результат другой операции этого типа</span>
+          <code>{pop.КОД_ОП.КОД_ПАРАМ}</code><span>значение параметра другой операции</span>
+          <code>{K.КОД}</code><span>значение из таблицы коэффициентов</span>
+          <code>{K.КОД|КЛЮЧ=ПАРАМ}</code><span>то же, но ключ <em>КЛЮЧ</em> читается из параметра <em>ПАРАМ</em> — можно заменить несколько ключей через запятую</span>
           <div class="ph-grid-sep"></div>
           <code>{NAME}</code><span>название операции <em class="ph-note-tag">(только в протоколе)</em></span>
           <code>{SHTS}</code><span>ШТС <em class="ph-note-tag">(только в протоколе)</em></span>

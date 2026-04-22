@@ -342,6 +342,20 @@ function insertAtActive(text) {
 // ---- Formula test modal ----
 let _ftCtx = null;
 
+// Разбирает {K.TableCode|KEY1=PARAM1,KEY2=PARAM2} → { tableCode, keyOverrides }
+function parseKPlaceholder(ph) {
+  const raw = ph.slice(2);
+  const pipeIdx = raw.indexOf('|');
+  if (pipeIdx < 0) return { tableCode: raw, keyOverrides: {} };
+  const tableCode = raw.slice(0, pipeIdx);
+  const keyOverrides = {};
+  raw.slice(pipeIdx + 1).split(',').forEach(ov => {
+    const eq = ov.indexOf('=');
+    if (eq >= 0) keyOverrides[ov.slice(0, eq).trim()] = ov.slice(eq + 1).trim();
+  });
+  return { tableCode, keyOverrides };
+}
+
 function makeParamInput(id, pType, defVal) {
   if (pType === 'List') {
     const opts = (defVal || '').split(';').filter(Boolean);
@@ -366,14 +380,20 @@ function evalSubFormula(formula, idPrefix) {
       return;
     }
     if (ph.startsWith('K.')) {
-      const tableCode = ph.slice(2);
+      const { tableCode, keyOverrides } = parseKPlaceholder(ph);
       const tbl = coefTables.find(t => t.code === tableCode);
       if (!tbl || tbl.keys.length === 0) {
         const el = document.getElementById(safeId);
         values[ph] = el ? (el.value.trim() || '0') : '0';
       } else {
         const keyValues = tbl.keys.map((key, ki) => {
-          const paramEl = document.getElementById('ft_p_' + key.replace(/[^a-zA-Z0-9]/g, '_'));
+          const effectiveParam = keyOverrides[key] || key;
+          // Если ключ не переопределён — проверяем shared input (для групп из нескольких таблиц)
+          if (!keyOverrides[key]) {
+            const sharedEl = document.getElementById(`ft_shared_${tableCode.replace(/[^a-zA-Z0-9]/g, '_')}_k${ki}`);
+            if (sharedEl) return sharedEl.value.trim() || '0';
+          }
+          const paramEl = document.getElementById('ft_p_' + effectiveParam.replace(/[^a-zA-Z0-9]/g, '_'));
           if (paramEl) return paramEl.value.trim() || '0';
           const kEl = document.getElementById(`${safeId}_k${ki}`);
           return kEl ? (kEl.value.trim() || '0') : '0';
@@ -499,6 +519,27 @@ function openFormulaTest(ti, oi) {
     if (!m[1].startsWith('p.') && !phSeen.has(m[1])) { phSeen.add(m[1]); phs.push(m[1]); }
   }));
 
+  // Группируем K. плейсхолдеры по базовому коду таблицы для вынесения общих ключей
+  const kGroups = new Map(); // tableCode → [{ph, keyOverrides}]
+  phs.forEach(ph => {
+    if (!ph.startsWith('K.')) return;
+    const { tableCode, keyOverrides } = parseKPlaceholder(ph);
+    if (!kGroups.has(tableCode)) kGroups.set(tableCode, []);
+    kGroups.get(tableCode).push({ ph, keyOverrides });
+  });
+  // Для групп из 2+ экземпляров — находим ключи, не переопределённые ни в одном
+  const kSharedKeyIndices = new Map(); // tableCode → Set<ki>
+  kGroups.forEach((instances, tableCode) => {
+    if (instances.length < 2) return;
+    const tbl = coefTables.find(t => t.code === tableCode);
+    if (!tbl) return;
+    const shared = new Set();
+    tbl.keys.forEach((key, ki) => {
+      if (!instances.some(inst => inst.keyOverrides[key])) shared.add(ki);
+    });
+    if (shared.size > 0) kSharedKeyIndices.set(tableCode, shared);
+  });
+
   // Shared param rows
   const paramRows = allParamCodes.map(code => {
     const sid = 'ft_p_' + code.replace(/[^a-zA-Z0-9]/g, '_');
@@ -519,19 +560,61 @@ function openFormulaTest(ti, oi) {
     return `<div class="ft-key-row"><span class="ft-key-name">${esc(key)}</span>${makeParamInput(`${safeId}_k${ki}`, paramTypes.get(key) || 'Float', paramDefaults.get(key) || '0')}</div>`;
   }).join('');
 
+  const renderedKGroups = new Set();
   const otherRows = phs.map(ph => {
     const safeId = 'ft_' + ph.replace(/[^a-zA-Z0-9]/g, '_');
     if (ph.startsWith('K.')) {
-      const tbl = coefTables.find(t => t.code === ph.slice(2));
-      if (!tbl || tbl.keys.length === 0)
-        return `<div class="ft-row"><label class="ft-label">{${esc(ph)}}</label><input type="number" step="any" id="${safeId}" class="ft-input" value="1"></div>`;
-      return `<div class="ft-row ft-row-table">
-        <label class="ft-label">{${esc(ph)}}</label>
-        <div class="ft-table-inputs">
-          <div class="ft-table-title">${esc(tbl.name || tbl.code)}</div>
-          ${makeKeyInput(tbl, safeId)}
-        </div>
-      </div>`;
+      const { tableCode, keyOverrides } = parseKPlaceholder(ph);
+      // Если группа уже отрендерена первым экземпляром — пропускаем
+      if (renderedKGroups.has(tableCode)) return '';
+      renderedKGroups.add(tableCode);
+
+      const tbl = coefTables.find(t => t.code === tableCode);
+      const group = kGroups.get(tableCode) || [{ ph, keyOverrides }];
+      const sharedIndices = kSharedKeyIndices.get(tableCode) || new Set();
+      const isMulti = group.length > 1 && sharedIndices.size > 0;
+
+      if (!tbl || tbl.keys.length === 0) {
+        return group.map(inst => {
+          const iSafeId = 'ft_' + inst.ph.replace(/[^a-zA-Z0-9]/g, '_');
+          return `<div class="ft-row"><label class="ft-label">{${esc(inst.ph)}}</label><input type="number" step="any" id="${iSafeId}" class="ft-input" value="1"></div>`;
+        }).join('');
+      }
+
+      // Общие ключи (выносим один раз для всей группы)
+      let sharedHtml = '';
+      if (isMulti) {
+        const sharedRows = tbl.keys.map((key, ki) => {
+          if (!sharedIndices.has(ki)) return '';
+          const sharedId = `ft_shared_${tableCode.replace(/[^a-zA-Z0-9]/g, '_')}_k${ki}`;
+          if (allParamSeen.has(key))
+            return `<div class="ft-key-row"><span class="ft-key-name">${esc(key)}</span><span class="ft-key-ref">← {p.${esc(key)}}</span></div>`;
+          return `<div class="ft-key-row"><span class="ft-key-name">${esc(key)}</span>${makeParamInput(sharedId, paramTypes.get(key) || 'Float', paramDefaults.get(key) || '0')}</div>`;
+        }).filter(Boolean).join('');
+        if (sharedRows) sharedHtml = `<div class="ft-row ft-row-table ft-row-shared">
+          <label class="ft-label ft-label-shared">{K.${esc(tableCode)}}<br>общие</label>
+          <div class="ft-table-inputs">${sharedRows}</div>
+        </div>`;
+      }
+
+      // Строки для каждого экземпляра (только не-общие ключи)
+      const instancesHtml = group.map(inst => {
+        const instSafeId = 'ft_' + inst.ph.replace(/[^a-zA-Z0-9]/g, '_');
+        const instanceRows = tbl.keys.map((key, ki) => {
+          if (isMulti && sharedIndices.has(ki)) return '';
+          const effectiveParam = inst.keyOverrides[key] || key;
+          if (allParamSeen.has(effectiveParam))
+            return `<div class="ft-key-row"><span class="ft-key-name">${esc(effectiveParam)}</span><span class="ft-key-ref">← {p.${esc(effectiveParam)}}</span></div>`;
+          return `<div class="ft-key-row"><span class="ft-key-name">${esc(effectiveParam)}</span>${makeParamInput(`${instSafeId}_k${ki}`, paramTypes.get(effectiveParam) || 'Float', paramDefaults.get(effectiveParam) || '0')}</div>`;
+        }).filter(Boolean).join('');
+        if (!instanceRows) return '';
+        return `<div class="ft-row ft-row-table">
+          <label class="ft-label">{${esc(inst.ph)}}</label>
+          <div class="ft-table-inputs">${instanceRows}</div>
+        </div>`;
+      }).join('');
+
+      return sharedHtml + instancesHtml;
     }
     if (ph.startsWith('op.')) {
       const opCode = ph.slice(3);
@@ -543,10 +626,18 @@ function openFormulaTest(ti, oi) {
       const subInputs = subPhs.filter(sp => !sp.startsWith('p.')).map(subPh => {
         const subId = `${safeId}_${subPh.replace(/[^a-zA-Z0-9]/g, '_')}`;
         if (subPh.startsWith('K.')) {
-          const subTbl = coefTables.find(t => t.code === subPh.slice(2));
+          const { tableCode: subTableCode, keyOverrides: subOverrides } = parseKPlaceholder(subPh);
+          const subTbl = coefTables.find(t => t.code === subTableCode);
           if (!subTbl || subTbl.keys.length === 0)
             return `<div class="ft-key-row"><span class="ft-key-name">{${esc(subPh)}}</span><input type="number" step="any" id="${subId}" class="ft-input" value="1"></div>`;
-          return `<div class="ft-key-row ft-key-row-nested"><span class="ft-key-name">{${esc(subPh)}}</span><div class="ft-table-inputs">${makeKeyInput(subTbl, subId)}</div></div>`;
+          const subKeyHtml = subTbl.keys.map((key, ki) => {
+            const effectiveParam = subOverrides[key] || key;
+            const label = subOverrides[key] ? `${esc(key)} → ${esc(subOverrides[key])}` : esc(key);
+            if (allParamSeen.has(effectiveParam))
+              return `<div class="ft-key-row"><span class="ft-key-name">${label}</span><span class="ft-key-ref">← {p.${esc(effectiveParam)}}</span></div>`;
+            return `<div class="ft-key-row"><span class="ft-key-name">${label}</span>${makeParamInput(`${subId}_k${ki}`, paramTypes.get(effectiveParam) || 'Float', paramDefaults.get(effectiveParam) || '0')}</div>`;
+          }).join('');
+          return `<div class="ft-key-row ft-key-row-nested"><span class="ft-key-name">{${esc(subPh)}}</span><div class="ft-table-inputs">${subKeyHtml}</div></div>`;
         }
         return '';
       }).filter(Boolean).join('');
@@ -630,14 +721,19 @@ function evalMainFormula(formula, ti) {
     if (values[ph] !== undefined) return;
     const safeId = 'ft_' + ph.replace(/[^a-zA-Z0-9]/g, '_');
     if (ph.startsWith('K.')) {
-      const tableCode = ph.slice(2);
+      const { tableCode, keyOverrides } = parseKPlaceholder(ph);
       const tbl = coefTables.find(t => t.code === tableCode);
       if (!tbl || tbl.keys.length === 0) {
         const el = document.getElementById(safeId);
         values[ph] = el ? (el.value.trim() || '0') : '0';
       } else {
         const keyValues = tbl.keys.map((key, ki) => {
-          const paramEl = document.getElementById('ft_p_' + key.replace(/[^a-zA-Z0-9]/g, '_'));
+          const effectiveParam = keyOverrides[key] || key;
+          if (!keyOverrides[key]) {
+            const sharedEl = document.getElementById(`ft_shared_${tableCode.replace(/[^a-zA-Z0-9]/g, '_')}_k${ki}`);
+            if (sharedEl) return sharedEl.value.trim() || '0';
+          }
+          const paramEl = document.getElementById('ft_p_' + effectiveParam.replace(/[^a-zA-Z0-9]/g, '_'));
           if (paramEl) return paramEl.value.trim() || '0';
           const kid = document.getElementById(`${safeId}_k${ki}`);
           return kid ? (kid.value.trim() || '0') : '0';
