@@ -649,6 +649,23 @@ function openFormulaTest(ti, oi) {
         </div>
       </div>`;
     }
+    if (ph.startsWith('pop.')) {
+      const parts = ph.slice(4).split('.');
+      if (parts.length !== 2) return '';
+      const [refOpCode, refParamCode] = parts;
+      const refOp = type.operations.find(o => o.code === refOpCode);
+      const refParam = refOp && refOp.params.find(p => p.code === refParamCode);
+      const pType = refParam ? refParam.type : 'Float';
+      const pDefault = refParam ? (refParam.defaultVal || '0') : '0';
+      const opLabel = refOp ? `${esc(refOp.name || refOpCode)}` : esc(refOpCode);
+      return `<div class="ft-row">
+        <label class="ft-label">{${esc(ph)}}</label>
+        <div style="display:flex;flex-direction:column;gap:3px;flex:1">
+          <span class="ft-table-title">${opLabel} · ${esc(refParamCode)}</span>
+          ${makeParamInput(safeId, pType, pDefault)}
+        </div>
+      </div>`;
+    }
     return '';
   }).filter(Boolean).join('');
 
