@@ -5,6 +5,7 @@ function scheduleGen(immediate) {
   if (!panelVisible) {
     // Панель скрыта — откладываем тяжёлую генерацию, только помечаем dirty
     _genDirty = true;
+    renderValidationBanner();
     refreshEditorErrors();
     renderSidebar(); // обновляем ⚠ значки в сайдбаре
     return;
@@ -104,15 +105,25 @@ function generateCode() {
         genFieldVB(op.shts, op.shtsBranches).forEach(l => out.push(l));
         genFieldVB(op.prof, op.profBranches).forEach(l => out.push(l));
         out.push(`        "${vb(op.code)}", _`);
-        if (op.params.length === 0) {
-          out.push(`        Array(), _`);
-        } else {
-          out.push(`        Array( _`);
-          op.params.forEach((p, pi) => {
-            out.push(`          ${paramVB(p)}${pi < op.params.length - 1 ? ', _' : ' _'}`);
-          });
-          out.push(`        ), _`);
-        }
+        const opSets = op.paramSets && op.paramSets.length
+          ? op.paramSets
+          : [{ name: 'По умолчанию', params: [] }];
+        out.push(`        Array( _`);
+        opSets.forEach((ps, si) => {
+          const lastPs = si === opSets.length - 1;
+          if (ps.params.length === 0) {
+            out.push(`          Array("${vb(ps.name)}", Array())${lastPs ? ' _' : ', _'}`);
+          } else {
+            out.push(`          Array("${vb(ps.name)}", _`);
+            out.push(`            Array( _`);
+            ps.params.forEach((p, pi) => {
+              out.push(`              ${paramVB(p)}${pi < ps.params.length - 1 ? ', _' : ' _'}`);
+            });
+            out.push(`            ) _`);
+            out.push(`          )${lastPs ? ' _' : ', _'}`);
+          }
+        });
+        out.push(`        ), _`);
         const fb = op.formulaBranches;
         if (fb && fb.length > 0) {
           out.push(`        Array( _`);
@@ -190,6 +201,12 @@ function paramVB(p) {
     }).join(', ');
     return `Array("${vb(p.name)}", "${vb(p.code)}", "CoefList", Array(${itemsVb}), ${parseInt(p.maxSelect) || 1})`;
   }
+  if (p.type === 'Image') {
+    const itemsVb = (p.items || []).map(it =>
+      `Array("${vb(it.label)}", "${vb(it.document)}", "${vb(it.file)}")`
+    ).join(', ');
+    return `Array("${vb(p.name)}", "${vb(p.code)}", "Image", Array(${itemsVb}))`;
+  }
   return `Array("${vb(p.name)}", "${vb(p.code)}", "${p.type}", ${defaultVB(p)})`;
 }
 function defaultVB(p) {
@@ -208,7 +225,7 @@ function conditionsToVB(conditionGroups, ti, oi) {
   const type = schema[ti];
   const op = type && type.operations[oi];
   if (type) type.paramSets.forEach(ps => ps.params.forEach(p => allParams.push(p)));
-  if (op) op.params.forEach(p => allParams.push(p));
+  if (op) getOpParams(op).forEach(p => allParams.push(p));
   const opMap = { '=': '=', '≠': '<>', '<': '<', '>': '>', '≤': '<=', '≥': '>=' };
   const condStr = c => {
     const vbOp = opMap[c.op] || '=';

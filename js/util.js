@@ -9,13 +9,24 @@ function adjustIdx(idx, from, to) {
   return idx;
 }
 
-function getParams(scope, ti, oi) {
+function getParams(scope, ti, oi, si) {
   if (scope === 'set') return schema[ti].paramSets[oi].params;
-  return schema[ti].operations[oi].params;
+  return schema[ti].operations[oi].paramSets[si].params;
 }
 
-function buildListChips(scope, ti, oi, pi, items) {
-  const a = `'${scope}',${ti},${oi},${pi}`;
+function getOpParams(op) {
+  return (op.paramSets || []).flatMap(ps => ps.params || []);
+}
+
+function getParamOptionValues(param) {
+  if (!param) return [];
+  if (param.type === 'List') return (param.defaultVal || '').split(';').filter(Boolean);
+  if (param.type === 'Image') return (param.items || []).map(it => it.label).filter(Boolean);
+  return [];
+}
+
+function buildListChips(scope, ti, oi, si, pi, items) {
+  const a = `'${scope}',${ti},${oi},${si === null ? 'null' : si},${pi}`;
   return items.map((item, idx) =>
     `<span class="list-tag" draggable="true"` +
     ` ondragstart="listDragStart(event,${a},${idx})"` +
@@ -27,22 +38,22 @@ function buildListChips(scope, ti, oi, pi, items) {
   ).join('');
 }
 
-function refreshListDOM(scope, ti, oi, pi) {
-  const tagsDiv = document.getElementById(`lt-${scope}-${ti}-${oi}-${pi}`);
+function refreshListDOM(scope, ti, oi, si, pi) {
+  const tagsDiv = document.getElementById(`lt-${scope}-${ti}-${oi}-${si === null ? 'x' : si}-${pi}`);
   if (!tagsDiv) return;
-  const items = (getParams(scope, ti, oi)[pi].defaultVal || '').split(';').filter(Boolean);
-  tagsDiv.innerHTML = buildListChips(scope, ti, oi, pi, items);
+  const items = (getParams(scope, ti, oi, si)[pi].defaultVal || '').split(';').filter(Boolean);
+  tagsDiv.innerHTML = buildListChips(scope, ti, oi, si, pi, items);
 }
 
-function addListItem(scope, ti, oi, pi, inputEl) {
+function addListItem(scope, ti, oi, si, pi, inputEl) {
   const val = inputEl.value.trim();
   if (!val) return;
-  const p = getParams(scope, ti, oi)[pi];
+  const p = getParams(scope, ti, oi, si)[pi];
   const items = (p.defaultVal || '').split(';').filter(Boolean);
   items.push(val);
   p.defaultVal = items.join(';');
   inputEl.value = '';
-  refreshListDOM(scope, ti, oi, pi);
+  refreshListDOM(scope, ti, oi, si, pi);
   scheduleGen(false);
 }
 
@@ -135,12 +146,12 @@ function getListValuesForCode(code) {
   const values = new Set();
   schema.forEach(type => {
     type.paramSets.forEach(ps => ps.params.forEach(p => {
-      if (p.code === code && p.type === 'List')
-        (p.defaultVal || '').split(';').filter(Boolean).forEach(v => values.add(v));
+      if (p.code === code && (p.type === 'List' || p.type === 'Image'))
+        getParamOptionValues(p).forEach(v => values.add(v));
     }));
-    type.operations.forEach(op => op.params.forEach(p => {
-      if (p.code === code && p.type === 'List')
-        (p.defaultVal || '').split(';').filter(Boolean).forEach(v => values.add(v));
+    type.operations.forEach(op => getOpParams(op).forEach(p => {
+      if (p.code === code && (p.type === 'List' || p.type === 'Image'))
+        getParamOptionValues(p).forEach(v => values.add(v));
     }));
   });
   return [...values];
@@ -150,16 +161,16 @@ function getAllParamMap() {
   const map = new Map(); // code → type
   schema.forEach(type => {
     type.paramSets.forEach(ps => ps.params.forEach(p => { if (p.code) map.set(p.code, p.type); }));
-    type.operations.forEach(op => op.params.forEach(p => { if (p.code) map.set(p.code, p.type); }));
+    type.operations.forEach(op => getOpParams(op).forEach(p => { if (p.code) map.set(p.code, p.type); }));
   });
   return map;
 }
 
-function removeListItem(scope, ti, oi, pi, idx) {
-  const p = getParams(scope, ti, oi)[pi];
+function removeListItem(scope, ti, oi, si, pi, idx) {
+  const p = getParams(scope, ti, oi, si)[pi];
   const items = (p.defaultVal || '').split(';').filter(Boolean);
   items.splice(idx, 1);
   p.defaultVal = items.join(';');
-  refreshListDOM(scope, ti, oi, pi);
+  refreshListDOM(scope, ti, oi, si, pi);
   scheduleGen(false);
 }

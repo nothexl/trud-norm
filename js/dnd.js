@@ -154,15 +154,15 @@ function protoBranchDrop(e, ti, oi, bi, toLi) {
   renderEditor(); scheduleGen(true);
 }
 
-function paramDragStart(e, scope, ti, oi, pi) {
+function paramDragStart(e, scope, ti, oi, si, pi) {
   if (!_paramGripDown) { e.preventDefault(); return; }
   _paramGripDown = false;
-  _paramDrag = { scope, ti, oi, pi };
+  _paramDrag = { scope, ti, oi, si, pi };
   e.dataTransfer.effectAllowed = 'move';
   setTimeout(() => e.currentTarget.classList.add('param-dragging'), 0);
 }
 function paramDragOver(e, pi) {
-  if (_listDrag) return;
+  if (_listDrag || _coefItemDrag) return;
   e.preventDefault(); e.dataTransfer.dropEffect = 'move';
   const tr = e.currentTarget;
   tr.classList.remove('param-drag-top', 'param-drag-bottom');
@@ -176,7 +176,7 @@ function paramDragEnd(e) {
   document.querySelectorAll('.param-drag-top,.param-drag-bottom').forEach(el => el.classList.remove('param-drag-top','param-drag-bottom'));
   _paramDrag = null;
 }
-function paramDrop(e, scope, ti, oi, toPi) {
+function paramDrop(e, scope, ti, oi, si, toPi) {
   e.preventDefault();
   const tr = e.currentTarget;
   tr.classList.remove('param-drag-top', 'param-drag-bottom');
@@ -184,7 +184,7 @@ function paramDrop(e, scope, ti, oi, toPi) {
   const fromPi = _paramDrag.pi;
   const insertAt = tr._pdPos === 'after' ? toPi + 1 : toPi;
   if (fromPi === insertAt || fromPi + 1 === insertAt) return;
-  const arr = getParams(scope, ti, oi);
+  const arr = getParams(scope, ti, oi, si);
   const [moved] = arr.splice(fromPi, 1);
   arr.splice(insertAt > fromPi ? insertAt - 1 : insertAt, 0, moved);
   renderEditor(); scheduleGen(true);
@@ -337,32 +337,58 @@ function psDrop(e, ti, toSi) {
   renderEditor(); scheduleGen(true);
 }
 
+// ---- Operation ParamSet Card DnD ----
+let _opsDrag = null;
+function opsDragStart(e, ti, oi, si) {
+  e.stopPropagation();
+  _opsDrag = { ti, oi, si };
+  e.dataTransfer.setData('text', '');
+  e.dataTransfer.effectAllowed = 'move';
+  setTimeout(() => e.currentTarget.classList.add('dragging'), 0);
+}
+function opsDragOver(e) { e.stopPropagation(); e.preventDefault(); e.dataTransfer.dropEffect = 'move'; e.currentTarget.classList.add('drag-over'); }
+function opsDragLeave(e) { e.stopPropagation(); e.currentTarget.classList.remove('drag-over'); }
+function opsDragEnd(e) {
+  e.currentTarget.classList.remove('dragging');
+  document.querySelectorAll('.paramset-card.drag-over').forEach(el => el.classList.remove('drag-over'));
+  _opsDrag = null;
+}
+function opsDrop(e, ti, oi, toSi) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  if (!_opsDrag || _opsDrag.ti !== ti || _opsDrag.oi !== oi || _opsDrag.si === toSi) return;
+  const sets = schema[ti].operations[oi].paramSets;
+  const [moved] = sets.splice(_opsDrag.si, 1);
+  sets.splice(_opsDrag.si < toSi ? toSi - 1 : toSi, 0, moved);
+  renderEditor(); scheduleGen(true);
+}
+
 // ---- List DnD ----
 let _listDrag = null;
-function listDragStart(e, scope, ti, oi, pi, idx) {
+function listDragStart(e, scope, ti, oi, si, pi, idx) {
   e.stopPropagation();
-  _listDrag = { scope, ti, oi, pi, idx };
+  _listDrag = { scope, ti, oi, si, pi, idx };
   e.dataTransfer.setData('text', '');
   e.dataTransfer.effectAllowed = 'move';
   setTimeout(() => e.target.classList.add('dragging'), 0);
 }
 function listDragOver(e) { e.stopPropagation(); e.preventDefault(); e.dataTransfer.dropEffect = 'move'; e.currentTarget.classList.add('drag-over'); }
 function listDragLeave(e) { e.stopPropagation(); e.currentTarget.classList.remove('drag-over'); }
-function listDragEnd(e, scope, ti, oi, pi) {
+function listDragEnd(e, scope, ti, oi, si, pi) {
   e.target.classList.remove('dragging');
   document.querySelectorAll('.list-tag.drag-over').forEach(el => el.classList.remove('drag-over'));
   _listDrag = null;
 }
-function listDrop(e, scope, ti, oi, pi, toIdx) {
+function listDrop(e, scope, ti, oi, si, pi, toIdx) {
   e.preventDefault();
   e.currentTarget.classList.remove('drag-over');
   if (!_listDrag || _listDrag.idx === toIdx) return;
-  const p = getParams(scope, ti, oi)[pi];
+  const p = getParams(scope, ti, oi, si)[pi];
   const items = (p.defaultVal || '').split(';').filter(Boolean);
   const [moved] = items.splice(_listDrag.idx, 1);
   items.splice(toIdx, 0, moved);
   p.defaultVal = items.join(';');
-  refreshListDOM(scope, ti, oi, pi);
+  refreshListDOM(scope, ti, oi, si, pi);
   scheduleGen(false);
 }
 
@@ -373,11 +399,11 @@ document.addEventListener('mouseup', () => { _coefItemGripDown = false; });
 
 function coefItemGripMouseDown() { _coefItemGripDown = true; }
 
-function coefItemDragStart(e, scope, ti, oi, pi, ii) {
+function coefItemDragStart(e, scope, ti, oi, si, pi, ii) {
   if (!_coefItemGripDown) { e.preventDefault(); return; }
   _coefItemGripDown = false;
   e.stopPropagation();
-  _coefItemDrag = { scope, ti, oi, pi, ii };
+  _coefItemDrag = { scope, ti, oi, si, pi, ii };
   e.dataTransfer.effectAllowed = 'move';
   setTimeout(() => e.currentTarget.classList.add('param-dragging'), 0);
 }
@@ -394,7 +420,7 @@ function coefItemDragEnd(e) {
   document.querySelectorAll('.coef-item-row.param-drag-top,.coef-item-row.param-drag-bottom').forEach(el => el.classList.remove('param-drag-top', 'param-drag-bottom'));
   _coefItemDrag = null;
 }
-function coefItemDrop(e, scope, ti, oi, pi, toIi) {
+function coefItemDrop(e, scope, ti, oi, si, pi, toIi) {
   e.stopPropagation(); e.preventDefault();
   const el = e.currentTarget;
   el.classList.remove('param-drag-top', 'param-drag-bottom');
@@ -402,7 +428,7 @@ function coefItemDrop(e, scope, ti, oi, pi, toIi) {
   const fromIi = _coefItemDrag.ii;
   const insertAt = el._ciPos === 'after' ? toIi + 1 : toIi;
   if (fromIi === insertAt || fromIi + 1 === insertAt) return;
-  const items = getParams(scope, ti, oi)[pi].items;
+  const items = getParams(scope, ti, oi, si)[pi].items;
   const [moved] = items.splice(fromIi, 1);
   items.splice(insertAt > fromIi ? insertAt - 1 : insertAt, 0, moved);
   renderEditor(); scheduleGen(true);

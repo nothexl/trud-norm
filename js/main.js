@@ -48,7 +48,7 @@ function addOp(ti) {
   const usedCodes = new Set(ops.map(op => op.code));
   let n = ops.length + 1;
   while (usedCodes.has(`${prefix}_${n}`)) n++;
-  ops.push({ name: 'Новая операция', shts: '', prof: '', code: `${prefix}_${n}`, params: [], formula: '', protocol: [], normTables: [], documents: [], techKit: '' });
+  ops.push({ name: 'Новая операция', shts: '', prof: '', code: `${prefix}_${n}`, paramSets: [{ name: 'По умолчанию', params: [] }], formula: '', protocol: [], normTables: [], documents: [], techKit: '' });
   sel = { kind:'op', ti, oi: ops.length - 1 };
   expandedTypes.add(ti);
   renderAll(true);
@@ -75,7 +75,6 @@ function duplicateOp(ti, oi) {
 }
 
 function addParamSet(ti) {
-  if (schema[ti].paramSets.length >= 5) return;
   const usedNames = new Set(schema[ti].paramSets.map(ps => ps.name));
   let n = 1;
   while (usedNames.has(`Новый набор (${n})`)) n++;
@@ -91,11 +90,10 @@ function deleteParamSet(ti, si) {
   renderEditor(); scheduleGen(true);
 }
 function duplicateParamSet(ti, si) {
-  if (schema[ti].paramSets.length >= 5) return;
   const src = schema[ti].paramSets[si];
   schema[ti].paramSets.splice(si + 1, 0, {
     name: src.name ? src.name + ' (копия)' : '',
-    params: src.params.map(p => ({ ...p }))
+    params: src.params.map(p => JSON.parse(JSON.stringify(p)))
   });
   renderEditor(); scheduleGen(true);
 }
@@ -104,6 +102,7 @@ function updateParamSetName(ti, si, val) {
   const dupNames = getDupSetNames(schema[ti].paramSets);
   const inp = document.getElementById('fld-set-name');
   if (inp) inp.classList.toggle('err', !val || dupNames.has(val));
+  renderSidebar();
   renderValidationBanner();
   scheduleGen(false);
 }
@@ -116,26 +115,82 @@ function backToSets(ti) {
   renderEditor();
 }
 
-function addParam(scope, ti, oi) {
-  const params = getParams(scope, ti, oi);
+function addOpParamSet(ti, oi) {
+  const sets = schema[ti].operations[oi].paramSets;
+  if (sets.length >= 5) return;
+  const usedNames = new Set(sets.map(ps => ps.name));
+  let n = 1;
+  while (usedNames.has(`Новый набор (${n})`)) n++;
+  sets.push({ name: `Новый набор (${n})`, params: [] });
+  sel = { kind: 'op', ti, oi, si: sets.length - 1 };
+  renderAll(true);
+}
+
+function deleteOpParamSet(ti, oi, si) {
+  const sets = schema[ti].operations[oi].paramSets;
+  if (sets.length <= 1) return;
+  if (!confirm('Удалить набор параметров операции?')) return;
+  sets.splice(si, 1);
+  sel = { kind: 'op', ti, oi };
+  renderEditor(); scheduleGen(true);
+}
+
+function duplicateOpParamSet(ti, oi, si) {
+  const sets = schema[ti].operations[oi].paramSets;
+  if (sets.length >= 5) return;
+  const src = sets[si];
+  sets.splice(si + 1, 0, {
+    name: src.name ? src.name + ' (копия)' : '',
+    params: src.params.map(p => JSON.parse(JSON.stringify(p)))
+  });
+  renderEditor(); scheduleGen(true);
+}
+
+function updateOpParamSetName(ti, oi, si, val) {
+  const sets = schema[ti].operations[oi].paramSets;
+  sets[si].name = val;
+  const dupNames = getDupSetNames(sets);
+  const inp = document.getElementById('fld-op-set-name');
+  if (inp) inp.classList.toggle('err', !val || dupNames.has(val));
+  renderSidebar();
+  renderValidationBanner(); scheduleGen(false);
+}
+
+function openOpParamSet(ti, oi, si) {
+  sel = { kind: 'op', ti, oi, si };
+  renderEditor();
+}
+
+function backToOp(ti, oi) {
+  sel = { kind: 'op', ti, oi };
+  renderEditor();
+}
+
+function addParam(scope, ti, oi, si) {
+  const params = getParams(scope, ti, oi, si);
   const used = new Set(params.map(p => p.code));
   let n = 1;
   while (used.has('OP_' + n)) n++;
   params.push({ name: 'Параметр ' + n, code: 'OP_' + n, type: 'Integer', defaultVal: '0' });
   renderEditor(); scheduleGen(true);
 }
-function deleteParam(scope, ti, oi, pi) {
-  getParams(scope, ti, oi).splice(pi, 1);
+function deleteParam(scope, ti, oi, si, pi) {
+  getParams(scope, ti, oi, si).splice(pi, 1);
   renderEditor(); scheduleGen(true);
 }
 
-function updateParamType(scope, ti, oi, pi, val) {
-  const p = getParams(scope, ti, oi)[pi];
+function updateParamType(scope, ti, oi, si, pi, val) {
+  const p = getParams(scope, ti, oi, si)[pi];
+  const oldType = p.type;
   p.type = val;
   if (val === 'CoefList') {
-    p.items = p.items || [];
+    p.items = oldType === 'CoefList' ? (p.items || []) : [];
     p.maxSelect = p.maxSelect || 1;
     delete p.defaultVal;
+  } else if (val === 'Image') {
+    p.items = oldType === 'Image' ? (p.items || []) : [];
+    delete p.defaultVal;
+    delete p.maxSelect;
   } else {
     const defs = { List:'', String:'', Integer:'0', Float:'0.0', Date:'', Boolean:'False' };
     p.defaultVal = defs[val] || '';
@@ -145,28 +200,47 @@ function updateParamType(scope, ti, oi, pi, val) {
   renderEditor(); scheduleGen(true);
 }
 
-function addCoefItem(scope, ti, oi, pi) {
-  const p = getParams(scope, ti, oi)[pi];
+function addCoefItem(scope, ti, oi, si, pi) {
+  const p = getParams(scope, ti, oi, si)[pi];
   if (!p.items) p.items = [];
   p.items.push({ label: '', value: 1 });
   renderEditor(); scheduleGen(true);
 }
 
-function deleteCoefItem(scope, ti, oi, pi, ii) {
-  const p = getParams(scope, ti, oi)[pi];
+function deleteCoefItem(scope, ti, oi, si, pi, ii) {
+  const p = getParams(scope, ti, oi, si)[pi];
   p.items.splice(ii, 1);
   p.maxSelect = Math.min(p.maxSelect || 1, p.items.length || 1);
   renderEditor(); scheduleGen(true);
 }
 
-function updateCoefItem(scope, ti, oi, pi, ii, field, val) {
-  getParams(scope, ti, oi)[pi].items[ii][field] = val;
+function updateCoefItem(scope, ti, oi, si, pi, ii, field, val) {
+  getParams(scope, ti, oi, si)[pi].items[ii][field] = val;
   scheduleGen(false);
 }
 
-function updateCoefMaxSelect(scope, ti, oi, pi, val) {
-  const p = getParams(scope, ti, oi)[pi];
+function updateCoefMaxSelect(scope, ti, oi, si, pi, val) {
+  const p = getParams(scope, ti, oi, si)[pi];
   p.maxSelect = Math.min(Math.max(1, val), p.items.length || 1);
+  scheduleGen(false);
+}
+
+function addImageItem(scope, ti, oi, si, pi) {
+  const p = getParams(scope, ti, oi, si)[pi];
+  if (!p.items) p.items = [];
+  p.items.push({ label: '', document: '', file: '' });
+  renderEditor(); scheduleGen(true);
+}
+
+function deleteImageItem(scope, ti, oi, si, pi, ii) {
+  getParams(scope, ti, oi, si)[pi].items.splice(ii, 1);
+  renderEditor(); scheduleGen(true);
+}
+
+function updateImageItem(scope, ti, oi, si, pi, ii, field, val, inputEl) {
+  getParams(scope, ti, oi, si)[pi].items[ii][field] = val;
+  if (inputEl) inputEl.classList.toggle('err', !String(val).trim());
+  renderValidationBanner();
   scheduleGen(false);
 }
 
@@ -187,7 +261,7 @@ function getAllOpParams(ti, oi) {
   const params = [], seen = new Set();
   const add = p => { if (p.code && !seen.has(p.code) && p.type !== 'CoefList') { seen.add(p.code); params.push(p); } };
   type.paramSets.forEach(ps => ps.params.forEach(add));
-  op.params.forEach(add);
+  getOpParams(op).forEach(add);
   return params;
 }
 
@@ -196,7 +270,7 @@ function _newCondition(ti, oi) {
   const p = params.length > 0 ? params[0] : null;
   const code = p ? p.code : '';
   let value = '';
-  if (p && p.type === 'List') { const v = (p.defaultVal||'').split(';').filter(Boolean); value = v[0] || ''; }
+  if (p && (p.type === 'List' || p.type === 'Image')) value = getParamOptionValues(p)[0] || '';
   else if (p && p.type === 'Boolean') value = 'True';
   return { code, op: '=', value };
 }
@@ -246,7 +320,7 @@ function updateBranchCondField(ti, oi, bi, gi, ci, field, val) {
   if (field === 'code') {
     const params = getAllOpParams(ti, oi);
     const p = params.find(p => p.code === val);
-    if (p && p.type === 'List') { const v = (p.defaultVal||'').split(';').filter(Boolean); c.value = v[0] || ''; }
+    if (p && (p.type === 'List' || p.type === 'Image')) c.value = getParamOptionValues(p)[0] || '';
     else if (p && p.type === 'Boolean') c.value = 'True';
     else c.value = '';
     if (p && !['Integer','Float'].includes(p.type) && ['<','>','≤','≥'].includes(c.op)) c.op = '=';
@@ -357,7 +431,7 @@ function parseKPlaceholder(ph) {
 }
 
 function makeParamInput(id, pType, defVal) {
-  if (pType === 'List') {
+  if (pType === 'List' || pType === 'Image') {
     const opts = (defVal || '').split(';').filter(Boolean);
     return `<select id="${id}" class="ft-input">${opts.map(o => `<option>${esc(o)}</option>`).join('')}</select>`;
   }
@@ -473,11 +547,12 @@ function openFormulaTest(ti, oi) {
   const registerParam = p => {
     if (!p.code) return;
     paramTypes.set(p.code, p.type);
-    paramDefaults.set(p.code, p.defaultVal || '0');
+    const optionValues = getParamOptionValues(p);
+    paramDefaults.set(p.code, optionValues.length ? optionValues.join(';') : (p.defaultVal || '0'));
     if (p.type === 'CoefList') paramCoefMeta.set(p.code, { items: p.items || [], maxSelect: p.maxSelect || 1 });
   };
   type.paramSets.forEach(ps => ps.params.forEach(registerParam));
-  op.params.forEach(registerParam);
+  getOpParams(op).forEach(registerParam);
 
   _ftCtx = { ti, oi, isBranched, paramTypes };
 
@@ -489,7 +564,7 @@ function openFormulaTest(ti, oi) {
     formulasToScan = [op.formula];
     [...op.formula.matchAll(/\{op\.([^}]+)\}/g)].forEach(m => {
       const refOp = type.operations.find(o => o.code === m[1]);
-      if (refOp) refOp.params.forEach(p => { if (p.code && !paramTypes.has(p.code)) { paramTypes.set(p.code, p.type); paramDefaults.set(p.code, p.defaultVal || '0'); } });
+      if (refOp) getOpParams(refOp).forEach(p => { if (p.code && !paramTypes.has(p.code)) { paramTypes.set(p.code, p.type); paramDefaults.set(p.code, p.defaultVal || '0'); } });
       if (refOp && refOp.formula.trim()) formulasToScan.push(refOp.formula);
     });
   }
@@ -654,7 +729,7 @@ function openFormulaTest(ti, oi) {
       if (parts.length !== 2) return '';
       const [refOpCode, refParamCode] = parts;
       const refOp = type.operations.find(o => o.code === refOpCode);
-      const refParam = refOp && refOp.params.find(p => p.code === refParamCode);
+      const refParam = refOp && getOpParams(refOp).find(p => p.code === refParamCode);
       const pType = refParam ? refParam.type : 'Float';
       const pDefault = refParam ? (refParam.defaultVal || '0') : '0';
       const opLabel = refOp ? `${esc(refOp.name || refOpCode)}` : esc(refOpCode);
@@ -935,7 +1010,7 @@ function updateFieldBranchCond(ti, oi, field, bi, gi, ci, f, val) {
   if (f === 'code') {
     const params = getAllOpParams(ti, oi);
     const p = params.find(p => p.code === val);
-    if (p && p.type === 'List') { const v = (p.defaultVal||'').split(';').filter(Boolean); c.value = v[0] || ''; }
+    if (p && (p.type === 'List' || p.type === 'Image')) c.value = getParamOptionValues(p)[0] || '';
     else if (p && p.type === 'Boolean') c.value = 'True';
     else c.value = '';
     if (p && !['Integer','Float'].includes(p.type) && ['<','>','≤','≥'].includes(c.op)) c.op = '=';
@@ -1006,7 +1081,7 @@ function updateProtoBranchCondField(ti, oi, bi, gi, ci, field, val) {
   if (field === 'code') {
     const params = getAllOpParams(ti, oi);
     const p = params.find(p => p.code === val);
-    if (p && p.type === 'List') { const v = (p.defaultVal||'').split(';').filter(Boolean); c.value = v[0] || ''; }
+    if (p && (p.type === 'List' || p.type === 'Image')) c.value = getParamOptionValues(p)[0] || '';
     else if (p && p.type === 'Boolean') c.value = 'True';
     else c.value = '';
     if (p && !['Integer','Float'].includes(p.type) && ['<','>','≤','≥'].includes(c.op)) c.op = '=';
@@ -1090,15 +1165,15 @@ function updateOp(ti, oi, field, val) {
   scheduleGen(false);
 }
 
-function updateParam(scope, ti, oi, pi, field, val) {
+function updateParam(scope, ti, oi, si, pi, field, val) {
   if (field === 'code') {
     val = filterCode(val).slice(0, 10);
     const inp = document.getElementById(`fld-p-${pi}`);
     if (inp && inp.value !== val) inp.value = val;
   }
-  getParams(scope, ti, oi)[pi][field] = val;
+  getParams(scope, ti, oi, si)[pi][field] = val;
   if (field === 'code') {
-    const params = getParams(scope, ti, oi);
+    const params = getParams(scope, ti, oi, si);
     const dups = getDupCodes(params);
     params.forEach((p, idx) => {
       const i = document.getElementById(`fld-p-${idx}`);
@@ -1211,7 +1286,7 @@ function refreshTableColumn(idx, ki) {
   if (!tbody) return;
   const allParamMap = getAllParamMap();
   const keyCode = tbl.keys[ki];
-  const isList = allParamMap.get(keyCode) === 'List';
+  const isList = ['List', 'Image'].includes(allParamMap.get(keyCode));
   const listVals = isList ? getListValuesForCode(keyCode) : [];
   tbody.querySelectorAll('tr').forEach((tr, ri) => {
     const td = tr.cells[ki];
@@ -1416,7 +1491,7 @@ function openCoefFilter(idx, ci, anchorEl) {
 
   const tbl      = coefTables[idx];
   const keyCode  = ci < tbl.keys.length ? tbl.keys[ci] : null;
-  const isListCol = keyCode && getAllParamMap().get(keyCode) === 'List';
+  const isListCol = keyCode && ['List', 'Image'].includes(getAllParamMap().get(keyCode));
 
   // Список значений для чекбоксов
   let values;
@@ -1653,7 +1728,7 @@ function loadExample() {
           name: "Подготовка к работе",
           shts: "А17-2р", prof: "19240",
           code: "T_PREP",
-          params: [],
+          paramSets: [{ name: "По умолчанию", params: [] }],
           normTables: ["ГКЛИ.3520-109 Карта 1"],
           documents: ["ГКЛИ.3520-109-2018"],
           formula: "{p.L_PIPE} * 0.02",
@@ -1668,9 +1743,9 @@ function loadExample() {
           name: "Резка труб",
           shts: "А17-3р", prof: "19240",
           code: "T_CUT",
-          params: [
+          paramSets: [{ name: "По умолчанию", params: [
             { name: "Количество резов, шт.", code: "C_CUTS", type: "Integer", defaultVal: "0" }
-          ],
+          ] }],
           normTables: ["ГКЛИ.3520-109 Карта 3"],
           formula: "{p.C_CUTS} * {K.K_MAT} * 0.15",
           protocol: [
@@ -1692,7 +1767,7 @@ function loadExample() {
             { conditionGroups: [], value: "19240" }
           ],
           code: "T_BEND",
-          params: [],
+          paramSets: [{ name: "По умолчанию", params: [] }],
           normTables: [],
           formula: "{p.DN} * {p.L_PIPE} * {K.K_DN} * 0.1",
           protocol: [
@@ -1705,9 +1780,9 @@ function loadExample() {
           name: "Сварка стыков",
           shts: "А17-4р", prof: "19256",
           code: "T_WELD",
-          params: [
+          paramSets: [{ name: "По умолчанию", params: [
             { name: "Количество стыков, шт.", code: "C_WELDS", type: "Integer", defaultVal: "0" }
-          ],
+          ] }],
           normTables: [],
           formula: undefined,
           formulaBranches: [
@@ -1726,9 +1801,9 @@ function loadExample() {
           name: "Гидроиспытание",
           shts: "А17-3р", prof: "12597",
           code: "T_TEST",
-          params: [
+          paramSets: [{ name: "По умолчанию", params: [
             { name: "Давление, МПа", code: "PRESS", type: "Integer", defaultVal: "0" }
-          ],
+          ] }],
           normTables: ["ГКЛИ.3520-109 Карта 7"],
           formula: "({op.T_WELD} + {p.L_PIPE} * 0.05) * {p.PRESS} * 0.1",
           protocol: undefined,

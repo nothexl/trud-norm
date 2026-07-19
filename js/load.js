@@ -140,7 +140,7 @@ function parsedToSchema(arr) {
         prof: Array.isArray(opArr[2]) ? '' : String(opArr[2] || ''),
         profBranches: Array.isArray(opArr[2]) ? opArr[2].map(b => { if (!Array.isArray(b)) return { conditionGroups: [], value: '' }; const parsed = parseConditionStr(String(b[0] || '')); return { conditionGroups: parsed !== null ? parsed : [], value: String(b[1] || '') }; }) : undefined,
         code: String(opArr[3] || ''),
-        params: (Array.isArray(opArr[4]) ? opArr[4] : []).map(p => parseParam(p)),
+        paramSets: parseOperationParamSets(opArr[4]),
         formula: Array.isArray(opArr[5]) ? '' : String(opArr[5] || ''),
         formulaBranches: Array.isArray(opArr[5])
           ? opArr[5].map(b => {
@@ -157,6 +157,22 @@ function parsedToSchema(arr) {
       }))
     };
   }).filter(Boolean);
+}
+
+function parseOperationParamSets(rawValue) {
+  const raw = Array.isArray(rawValue) ? rawValue : [];
+  const isSetFormat = raw.length > 0 &&
+    Array.isArray(raw[0]) && raw[0].length === 2 && Array.isArray(raw[0][1]);
+  if (isSetFormat) {
+    return raw.map(s => ({
+      name: String(s[0] || ''),
+      params: (Array.isArray(s[1]) ? s[1] : []).map(p => parseParam(p))
+    }));
+  }
+  return [{
+    name: 'По умолчанию',
+    params: raw.map(p => parseParam(p))
+  }];
 }
 
 function parseConditionStr(str) {
@@ -193,6 +209,14 @@ function parseParam(p) {
       : { label: '', value: 1 }
     );
     return { name: String(p[0] || ''), code: String(p[1] || ''), type, items, maxSelect: parseInt(p[4]) || 1 };
+  }
+  if (type === 'Image') {
+    const rawItems = Array.isArray(p[3]) ? p[3] : [];
+    const items = rawItems.map(it => Array.isArray(it)
+      ? { label: String(it[0] || ''), document: String(it[1] || ''), file: String(it[2] || '') }
+      : { label: '', document: '', file: '' }
+    );
+    return { name: String(p[0] || ''), code: String(p[1] || ''), type, items };
   }
   const raw = p[3];
   let defaultVal = '';

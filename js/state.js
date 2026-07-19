@@ -1,6 +1,6 @@
 let schema = [];
 let coefTables = []; // global coefficient tables
-let sel = null; // null | {kind:'type',ti} | {kind:'op',ti,oi} | {kind:'table',idx}
+let sel = null; // null | {kind:'type',ti[,si]} | {kind:'op',ti,oi[,si]} | {kind:'table',idx}
 let expandedTypes = new Set();
 let paramColWidths = { name: null, code: 130, type: 100, def: null }; // name/def initialized by initColWidths()
 let panelVisible = false;

@@ -57,7 +57,18 @@ function renderValidationBanner() {
       }
     });
     type.operations.forEach(op => {
-      getDupCodes(op.params).forEach(c => errors.push(`Операция «${esc(op.name)}» (${esc(op.code)}): дубль параметра <b>${esc(c)}</b>`));
+      const sets = op.paramSets || [];
+      const dupNames = getDupSetNames(sets);
+      const reportedNames = new Set();
+      sets.forEach((ps, si) => {
+        const ctx = `Операция «${esc(op.name)}» (${esc(op.code)}), набор «${esc(ps.name) || `#${si+1}`}»`;
+        getDupCodes(ps.params).forEach(c => errors.push(`${ctx}: дубль параметра <b>${esc(c)}</b>`));
+        if (!ps.name) errors.push(`${ctx}: не указано название набора`);
+        else if (dupNames.has(ps.name) && !reportedNames.has(ps.name)) {
+          reportedNames.add(ps.name);
+          errors.push(`Операция «${esc(op.name)}» (${esc(op.code)}): дублирующееся название набора «${esc(ps.name)}»`);
+        }
+      });
     });
   });
   // Coefficient table duplicate codes
@@ -98,9 +109,18 @@ function renderValidationBanner() {
     const checkParams = (params, context) => params.forEach(p => {
       if (!p.name) errors.push(`${context}, параметр (код ${esc(p.code) || '?'}): не указано название`);
       if (!p.code) errors.push(`${context}, параметр «${esc(p.name) || '(без названия)'}»: не указан код`);
+      if (p.type === 'Image') {
+        (p.items || []).forEach((item, ii) => {
+          const itemContext = `${context}, параметр «${esc(p.name) || esc(p.code) || '(без названия)'}», пункт #${ii + 1}`;
+          if (!String(item.label || '').trim()) errors.push(`${itemContext}: не указано название пункта`);
+          if (!String(item.document || '').trim()) errors.push(`${itemContext}: не указано обозначение документа`);
+          if (!String(item.file || '').trim()) errors.push(`${itemContext}: не указано наименование файла`);
+        });
+      }
     });
     type.paramSets.forEach((ps, si) => checkParams(ps.params, `Тип «${esc(type.name)}», набор «${esc(ps.name) || `#${si+1}`}»`));
-    type.operations.forEach(op => checkParams(op.params, `Операция «${esc(op.name) || '(без названия)'}» (${esc(op.code || '?')})`));
+    type.operations.forEach(op => (op.paramSets || []).forEach((ps, si) =>
+      checkParams(ps.params, `Операция «${esc(op.name) || '(без названия)'}» (${esc(op.code || '?')}), набор «${esc(ps.name) || `#${si+1}`}»`)));
   });
 
   // Parameter code length > 10 (from loaded files)
@@ -108,9 +128,9 @@ function renderValidationBanner() {
     type.paramSets.forEach(ps => ps.params.forEach(p => {
       if (p.code && p.code.length > 10) errors.push(`Набор «${esc(ps.name) || '?'}», параметр «${esc(p.name) || '(без названия)'}»: код <b>${esc(p.code)}</b> превышает 10 символов`);
     }));
-    type.operations.forEach(op => op.params.forEach(p => {
-      if (p.code && p.code.length > 10) errors.push(`Операция «${esc(op.name) || '(без названия)'}», параметр «${esc(p.name) || '(без названия)'}»: код <b>${esc(p.code)}</b> превышает 10 символов`);
-    }));
+    type.operations.forEach(op => (op.paramSets || []).forEach(ps => ps.params.forEach(p => {
+      if (p.code && p.code.length > 10) errors.push(`Операция «${esc(op.name) || '(без названия)'}», набор «${esc(ps.name) || '?'}», параметр «${esc(p.name) || '(без названия)'}»: код <b>${esc(p.code)}</b> превышает 10 символов`);
+    })));
   });
 
   // Formula and protocol placeholder validation
@@ -157,7 +177,7 @@ function renderValidationBanner() {
           else {
             const refOp = type.operations.find(o => o.code === parts[0]);
             if (!refOp) errors.push(`${context}: неизвестная операция <b>${esc(parts[0])}</b> в <b>{${esc(ph)}}</b>`);
-            else if (!refOp.params.some(p => p.code === parts[1])) errors.push(`${context}: у операции <b>${esc(parts[0])}</b> нет параметра <b>${esc(parts[1])}</b>`);
+            else if (!getOpParams(refOp).some(p => p.code === parts[1])) errors.push(`${context}: у операции <b>${esc(parts[0])}</b> нет параметра <b>${esc(parts[1])}</b>`);
           }
         }
         else errors.push(`${context}: неизвестный плейсхолдер <b>{${esc(ph)}}</b>`);
@@ -174,7 +194,7 @@ function renderValidationBanner() {
         else _fieldErrors[feKey].protocol.add(li);
       };
       const opCtx = `Операция «${esc(op.name) || '(без названия)'}» (${esc(op.code || '?')})`;
-      const allParamCodes = new Set([...typeParamCodes, ...op.params.map(p => p.code).filter(Boolean)]);
+      const allParamCodes = new Set([...typeParamCodes, ...getOpParams(op).map(p => p.code).filter(Boolean)]);
       const checkOp = (text, ctx, allowValue) => {
         const builtins = new Set(allowValue ? ['NAME', 'SHTS', 'PROF', 'VALUE'] : []);
         [...text.matchAll(/\{([^}]+)\}/g)].forEach(m => {
@@ -189,7 +209,7 @@ function renderValidationBanner() {
             else {
               const refOp = type.operations.find(o => o.code === parts[0]);
               if (!refOp) errors.push(`${ctx}: неизвестная операция <b>${esc(parts[0])}</b> в <b>{${esc(ph)}}</b>`);
-              else if (!refOp.params.some(p => p.code === parts[1])) errors.push(`${ctx}: у операции <b>${esc(parts[0])}</b> нет параметра <b>${esc(parts[1])}</b>`);
+              else if (!getOpParams(refOp).some(p => p.code === parts[1])) errors.push(`${ctx}: у операции <b>${esc(parts[0])}</b> нет параметра <b>${esc(parts[1])}</b>`);
             }
           }
           else errors.push(`${ctx}: неизвестный плейсхолдер <b>{${esc(ph)}}</b>`);
@@ -203,10 +223,10 @@ function renderValidationBanner() {
         checkOp(fml, ctx, false);
         const paramTypes = new Map();
         type.paramSets.forEach(ps => ps.params.forEach(p => { if (p.code) paramTypes.set(p.code, p.type); }));
-        op.params.forEach(p => { if (p.code) paramTypes.set(p.code, p.type); });
+        getOpParams(op).forEach(p => { if (p.code) paramTypes.set(p.code, p.type); });
         [...fml.matchAll(/\{p\.([^}]+)\}/g)].forEach(m => {
           const pType = paramTypes.get(m[1]);
-          if (pType === 'String' || pType === 'Date')
+          if (pType === 'String' || pType === 'Date' || pType === 'Image')
             errors.push(`${ctx}: параметр <b>${esc(m[1])}</b> имеет тип ${pType} — текстовые параметры нельзя использовать в формуле`);
         });
         const knownFns = /\b(Abs|Atn|Cos|Exp|Fix|Int|Log|Rnd|Sgn|Sin|Sqr|Tan|Round)\s*\(/gi;
@@ -326,9 +346,9 @@ function renderValidationBanner() {
     type.paramSets.forEach(ps => ps.params.forEach(p => {
       if (p.code && hasInvalidCodeChars.test(p.code)) errors.push(`Набор «${esc(ps.name) || '?'}», параметр «${esc(p.name) || '(без названия)'}»: код <b>${esc(p.code)}</b> содержит недопустимые символы`);
     }));
-    type.operations.forEach(op => op.params.forEach(p => {
-      if (p.code && hasInvalidCodeChars.test(p.code)) errors.push(`Операция «${esc(op.name) || '(без названия)'}», параметр «${esc(p.name) || '(без названия)'}»: код <b>${esc(p.code)}</b> содержит недопустимые символы`);
-    }));
+    type.operations.forEach(op => (op.paramSets || []).forEach(ps => ps.params.forEach(p => {
+      if (p.code && hasInvalidCodeChars.test(p.code)) errors.push(`Операция «${esc(op.name) || '(без названия)'}», набор «${esc(ps.name) || '?'}», параметр «${esc(p.name) || '(без названия)'}»: код <b>${esc(p.code)}</b> содержит недопустимые символы`);
+    })));
   });
   coefTables.forEach(tbl => {
     const label = esc(tbl.name || tbl.code);
@@ -368,8 +388,10 @@ function refreshEditorErrors() {
     if (nameInp) nameInp.classList.toggle('err', !op.name);
     const inp = document.getElementById('fld-op-code');
     if (inp) inp.classList.toggle('err', !op.code || dupOps.has(op.code));
-    const dups = getDupCodes(op.params);
-    op.params.forEach((p, pi) => {
+    const activeSet = sel.si !== undefined ? op.paramSets[sel.si] : null;
+    const params = activeSet ? activeSet.params : [];
+    const dups = getDupCodes(params);
+    params.forEach((p, pi) => {
       const ni = document.getElementById(`fld-pn-${pi}`);
       if (ni) ni.classList.toggle('err', !p.name);
       const i = document.getElementById(`fld-p-${pi}`);
@@ -392,7 +414,12 @@ function refreshEditorErrors() {
       }
     });
     const tag = document.getElementById('tag-params');
-    if (tag) { tag.textContent = op.params.length; tag.classList.toggle('err', dups.size > 0); }
+    if (tag) { tag.textContent = params.length; tag.classList.toggle('err', dups.size > 0); }
+    if (activeSet) {
+      const dupNames = getDupSetNames(op.paramSets);
+      const setNameInp = document.getElementById('fld-op-set-name');
+      if (setNameInp) setNameInp.classList.toggle('err', !activeSet.name || dupNames.has(activeSet.name));
+    }
     const fe = _fieldErrors[`${sel.ti}:${sel.oi}`];
     const fldFormula = document.getElementById('fld-formula');
     if (fldFormula) fldFormula.classList.toggle('err', !!(fe && fe.formula));

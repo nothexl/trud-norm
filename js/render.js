@@ -16,10 +16,14 @@ function renderSidebar() {
   const dupTypeNames = getDupTypeNames();
   schema.forEach((type, ti) => {
     const typeHasOpErr = type.operations.some(op => op.code && globalDupOpCodes.has(op.code));
+    const commonSetsHaveErr = getDupSetNames(type.paramSets).size > 0 ||
+      type.paramSets.some(ps => !ps.name || getDupCodes(ps.params).size > 0);
     const hasErr = typeHasOpErr ||
       dupTypeNames.has(type.name) ||
-      type.paramSets.some(ps => getDupCodes(ps.params).size > 0) ||
-      type.operations.some(op => getDupCodes(op.params).size > 0);
+      commonSetsHaveErr ||
+      type.operations.some(op =>
+        getDupSetNames(op.paramSets || []).size > 0 ||
+        (op.paramSets || []).some(ps => !ps.name || getDupCodes(ps.params).size > 0));
     const isTypeSel = sel && sel.kind === 'type' && sel.ti === ti;
     const expanded = expandedTypes.has(ti);
 
@@ -50,9 +54,11 @@ function renderSidebar() {
         const isDup = globalDupOpCodes.has(op.code);
         const fe = _fieldErrors[`${ti}:${oi}`];
         const invalidCode = /[^A-Za-z0-9_]/;
+        const opParams = getOpParams(op);
         const hasOpErr = isDup || !op.code || invalidCode.test(op.code) ||
-          getDupCodes(op.params).size > 0 ||
-          op.params.some(p => !p.code || p.code.length > 10 || invalidCode.test(p.code)) ||
+          getDupSetNames(op.paramSets || []).size > 0 ||
+          (op.paramSets || []).some(ps => !ps.name || getDupCodes(ps.params).size > 0) ||
+          opParams.some(p => !p.code || p.code.length > 10 || invalidCode.test(p.code)) ||
           !!(fe && (fe.formula || fe.protocol.size > 0));
         const isOpSel = sel && sel.kind === 'op' && sel.ti === ti && sel.oi === oi;
         const row = document.createElement('div');
@@ -132,7 +138,7 @@ function buildOneTableRow(idx, ri, li, tbl, allParamMap, dupRowIdxs) {
   const isDupRow = dupRowIdxs.has(ri);
   const grip = `<td class="col-ctl"><span class="param-grip" title="Перетащить" onmousedown="rowGripMouseDown()">⠿</span></td>`;
   const cells = tbl.keys.map((k, ci) => {
-    if (allParamMap.get(k) === 'List') {
+    if (['List', 'Image'].includes(allParamMap.get(k))) {
       const opts = getListValuesForCode(k);
       const cur = row[ci] || '';
       const opts2 = `<option value="">—</option>` + opts.map(v => `<option value="${esc(v)}"${cur===v?' selected':''}>${esc(v)}</option>`).join('');
@@ -164,10 +170,11 @@ function renderTypeEditor(ti) {
   if (sel.si !== undefined) { renderParamSetEditor(ti, sel.si); return; }
   const type = schema[ti];
   const dupOps = getGlobalDupOpCodes();
-  const setsTag = `<span class="tag" id="tag-sets">${type.paramSets.length}</span>`;
   const opsTag = `<span class="tag">${type.operations.length}</span>`;
-  const canAddSet = type.paramSets.length < 5;
   const dupSetNames = getDupSetNames(type.paramSets);
+  const hasSetErrors = dupSetNames.size > 0 ||
+    type.paramSets.some(ps => !ps.name || getDupCodes(ps.params).size > 0);
+  const setsTag = `<span class="tag${hasSetErrors ? ' err' : ''}" id="tag-sets">${type.paramSets.length}</span>`;
 
   document.getElementById('editor').innerHTML =
     `<div class="section">
@@ -182,7 +189,7 @@ function renderTypeEditor(ti) {
     <div class="section">
       <div class="section-title">
         <span class="stitle">Наборы параметров ${setsTag}</span>
-        ${canAddSet ? `<button class="btn-primary btn-sm" onclick="addParamSet(${ti})">+ Набор</button>` : ''}
+        <button class="btn-primary btn-sm" onclick="addParamSet(${ti})">+ Набор</button>
       </div>
       <div class="section-body">
         ${type.paramSets.length === 0
@@ -191,14 +198,13 @@ function renderTypeEditor(ti) {
               ${type.paramSets.map((ps, si) => {
                 const dupErr = getDupCodes(ps.params).size > 0;
                 const nameErr = !ps.name || dupSetNames.has(ps.name);
-                const canDup = type.paramSets.length < 5;
                 return `<div class="paramset-card${(dupErr || nameErr) ? ' has-err' : ''}" draggable="true" ondragstart="psDragStart(event,${ti},${si})" ondragover="psDragOver(event)" ondragleave="psDragLeave(event)" ondrop="psDrop(event,${ti},${si})" ondragend="psDragEnd(event)" onclick="openParamSet(${ti},${si})">
                   <div class="psc-body">
                     <div class="psc-name">${ps.name ? esc(ps.name) : '<span style="color:#bbb;font-style:italic">без названия</span>'}</div>
                     <div class="psc-meta">${ps.params.length} пар.</div>
                   </div>
                   <div class="psc-actions">
-                    ${canDup ? `<button class="iact-btn" onclick="event.stopPropagation();duplicateParamSet(${ti},${si})" title="Дублировать">⧉</button>` : ''}
+                    <button class="iact-btn" onclick="event.stopPropagation();duplicateParamSet(${ti},${si})" title="Дублировать">⧉</button>
                     <button class="iact-btn del" onclick="event.stopPropagation();deleteParamSet(${ti},${si})" title="Удалить">✕</button>
                   </div>
                 </div>`;
@@ -217,11 +223,13 @@ function renderTypeEditor(ti) {
           : `<div class="ops-summary">
               ${type.operations.map((op, oi) => {
                 const isDup = dupOps.has(op.code);
-                const hasParamErr = getDupCodes(op.params).size > 0;
+                const opParams = getOpParams(op);
+                const hasParamErr = getDupSetNames(op.paramSets || []).size > 0 ||
+                  (op.paramSets || []).some(ps => !ps.name || getDupCodes(ps.params).size > 0);
                 return `<div class="ops-summary-item" onclick="selectOp(${ti},${oi})">
                   <span class="s-code${isDup ? ' dup' : ''}">${esc(op.code)}</span>
                   <span class="s-name">${esc(op.name) || '(без названия)'}</span>
-                  <span class="s-pcount">${hasParamErr ? '⚠' : (op.params.length > 0 ? op.params.length + 'п' : '')}</span>
+                  <span class="s-pcount">${hasParamErr ? '⚠' : (opParams.length > 0 ? opParams.length + 'п' : '')}</span>
                 </div>`;
               }).join('')}
             </div>`}
@@ -253,12 +261,12 @@ function renderParamSetEditor(ti, si) {
     <div class="section">
       <div class="section-title">
         <span class="stitle">Параметры ${paramTag}</span>
-        <button class="btn-primary btn-sm" onclick="addParam('set',${ti},${si})">+ Параметр</button>
+        <button class="btn-primary btn-sm" onclick="addParam('set',${ti},${si},null)">+ Параметр</button>
       </div>
       <div class="section-body">
         ${ps.params.length === 0
           ? '<div style="color:#bbb;font-size:12px">Нет параметров</div>'
-          : renderParamsTable('set', ti, si, ps.params, dupParams)}
+          : renderParamsTable('set', ti, si, null, ps.params, dupParams)}
       </div>
     </div>`;
 }
@@ -266,10 +274,14 @@ function renderParamSetEditor(ti, si) {
 function renderOpEditor(ti, oi) {
   const type = schema[ti];
   const op = type.operations[oi];
+  if (sel.si !== undefined) { renderOpParamSetEditor(ti, oi, sel.si); return; }
   const dupOps = getGlobalDupOpCodes();
-  const dupParams = getDupCodes(op.params);
   const codeErr = op.code && dupOps.has(op.code);
-  const paramTag = `<span class="tag${dupParams.size > 0 ? ' err' : ''}" id="tag-params">${op.params.length}</span>`;
+  const sets = op.paramSets || [];
+  const dupSetNames = getDupSetNames(sets);
+  const hasSetErrors = dupSetNames.size > 0 || sets.some(ps => !ps.name || getDupCodes(ps.params).size > 0);
+  const setsTag = `<span class="tag${hasSetErrors ? ' err' : ''}" id="tag-op-sets">${sets.length}</span>`;
+  const canAddSet = sets.length < 5;
 
   document.getElementById('editor').innerHTML =
     `<div class="section">
@@ -295,18 +307,67 @@ function renderOpEditor(ti, oi) {
     ${renderTechKitSection(ti, oi)}
     <div class="section">
       <div class="section-title">
-        <span class="stitle">Уникальные параметры операции ${paramTag}</span>
-        <button class="btn-primary btn-sm" onclick="addParam('op',${ti},${oi})">+ Параметр</button>
+        <span class="stitle">Наборы параметров операции ${setsTag}</span>
+        ${canAddSet ? `<button class="btn-primary btn-sm" onclick="addOpParamSet(${ti},${oi})">+ Набор</button>` : ''}
       </div>
       <div class="section-body">
-        ${op.params.length === 0
-          ? '<div style="color:#bbb;font-size:12px">Нет уникальных параметров</div>'
-          : renderParamsTable('op', ti, oi, op.params, dupParams)}
+        <div class="paramsets-grid">
+          ${sets.map((ps, si) => {
+            const dupErr = getDupCodes(ps.params).size > 0;
+            const nameErr = !ps.name || dupSetNames.has(ps.name);
+            const canDup = sets.length < 5;
+            return `<div class="paramset-card${(dupErr || nameErr) ? ' has-err' : ''}" draggable="true" ondragstart="opsDragStart(event,${ti},${oi},${si})" ondragover="opsDragOver(event)" ondragleave="opsDragLeave(event)" ondrop="opsDrop(event,${ti},${oi},${si})" ondragend="opsDragEnd(event)" onclick="openOpParamSet(${ti},${oi},${si})">
+              <div class="psc-body">
+                <div class="psc-name">${ps.name ? esc(ps.name) : '<span style="color:#bbb;font-style:italic">без названия</span>'}</div>
+                <div class="psc-meta">${ps.params.length} пар.</div>
+              </div>
+              <div class="psc-actions">
+                ${canDup ? `<button class="iact-btn" onclick="event.stopPropagation();duplicateOpParamSet(${ti},${oi},${si})" title="Дублировать">⧉</button>` : ''}
+                ${sets.length > 1 ? `<button class="iact-btn del" onclick="event.stopPropagation();deleteOpParamSet(${ti},${oi},${si})" title="Удалить">✕</button>` : ''}
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
       </div>
     </div>
     ${renderPlaceholderHints(ti, oi)}
     ${renderFormulaSection(ti, oi)}
     ${renderOpProtocolSection(ti, oi)}`;
+}
+
+function renderOpParamSetEditor(ti, oi, si) {
+  const type = schema[ti];
+  const op = type.operations[oi];
+  const ps = op.paramSets[si];
+  const dupParams = getDupCodes(ps.params);
+  const dupNames = getDupSetNames(op.paramSets);
+  const nameErr = !ps.name || dupNames.has(ps.name);
+  const paramTag = `<span class="tag${dupParams.size > 0 ? ' err' : ''}" id="tag-params">${ps.params.length}</span>`;
+
+  document.getElementById('editor').innerHTML =
+    `<div class="section">
+      <div class="breadcrumb" style="display:flex;align-items:center;gap:8px">
+        <button class="btn-back" onclick="backToOp(${ti},${oi})">← Операция</button>
+        <span>${esc(op.code)}: <strong>${esc(op.name)}</strong></span>
+      </div>
+      <div class="section-body">
+        <div class="field-row">
+          <span class="field-label">Название набора</span>
+          <input id="fld-op-set-name" class="field-input${nameErr ? ' err' : ''}" type="text" value="${esc(ps.name)}" oninput="updateOpParamSetName(${ti},${oi},${si},this.value)" placeholder="Например: По умолчанию">
+        </div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title">
+        <span class="stitle">Параметры ${paramTag}</span>
+        <button class="btn-primary btn-sm" onclick="addParam('op',${ti},${oi},${si})">+ Параметр</button>
+      </div>
+      <div class="section-body">
+        ${ps.params.length === 0
+          ? '<div style="color:#bbb;font-size:12px">Нет параметров</div>'
+          : renderParamsTable('op', ti, oi, si, ps.params, dupParams)}
+      </div>
+    </div>`;
 }
 
 // Состояние свёрнутости групп чипсов (сохраняется на сессию)
@@ -317,9 +378,9 @@ function buildPlaceholderChipsHTML(ti, oi) {
   const type = schema[ti];
   const op = type.operations[oi];
   const paramCodes = new Set();
-  const excludedTypes = new Set(['String', 'Date']);
+  const excludedTypes = new Set(['String', 'Date', 'Image']);
   type.paramSets.forEach(ps => ps.params.forEach(p => { if (p.code && !excludedTypes.has(p.type)) paramCodes.add(p.code); }));
-  op.params.forEach(p => { if (p.code && !excludedTypes.has(p.type)) paramCodes.add(p.code); });
+  getOpParams(op).forEach(p => { if (p.code && !excludedTypes.has(p.type)) paramCodes.add(p.code); });
   const otherOps = type.operations.filter((o, i) => i !== oi && o.code);
   // searchText — отдельный текст для поиска (если отличается от label)
   const chip = (text, cls, label, searchText) =>
@@ -332,7 +393,7 @@ function buildPlaceholderChipsHTML(ti, oi) {
 
   // Подгруппы «Параметры других операций»: по одной подгруппе на операцию
   const popGroupsHtml = otherOps.map(o => {
-    const popParams = o.params.filter(p => p.code && !excludedTypes.has(p.type));
+    const popParams = getOpParams(o).filter(p => p.code && !excludedTypes.has(p.type));
     if (!popParams.length) return '';
     const popChips = popParams.map(p =>
       chip(`{pop.${esc(o.code)}.${esc(p.code)}}`, 'pop-ref', esc(p.code), `${o.code} ${p.code}`)
@@ -348,7 +409,7 @@ function buildPlaceholderChipsHTML(ti, oi) {
     </div>`;
   }).join('');
   const popTotalCount = otherOps.reduce(
-    (sum, o) => sum + o.params.filter(p => p.code && !excludedTypes.has(p.type)).length, 0
+    (sum, o) => sum + getOpParams(o).filter(p => p.code && !excludedTypes.has(p.type)).length, 0
   );
 
   const makeGroup = (id, label, chips, count, hasSubgroups = false) => {
@@ -410,8 +471,8 @@ function renderFormulaSection(ti, oi) {
       const paramOpts = allParams.map(p => `<option value="${esc(p.code)}"${p.code===c.code?' selected':''}>${esc(p.name||p.code)}</option>`).join('');
       let valInput;
       const valId = `fld-cv-${bi}-${gi}-${ci}`;
-      if (pType === 'List') {
-        const vals = (param.defaultVal||'').split(';').filter(Boolean);
+      if (pType === 'List' || pType === 'Image') {
+        const vals = getParamOptionValues(param);
         valInput = `<select id="${valId}" class="fb-val-inp" onchange="updateBranchCondField(${ti},${oi},${bi},${gi},${ci},'value',this.value)">${vals.map(v=>`<option value="${esc(v)}"${c.value===v?' selected':''}>${esc(v)}</option>`).join('')}</select>`;
       } else if (pType === 'Boolean') {
         valInput = `<select id="${valId}" class="fb-val-inp" onchange="updateBranchCondField(${ti},${oi},${bi},${gi},${ci},'value',this.value)"><option value="True"${c.value==='True'?' selected':''}>True</option><option value="False"${c.value==='False'?' selected':''}>False</option></select>`;
@@ -576,8 +637,8 @@ function renderOpFieldSection(ti, oi, field, label, placeholder) {
       const paramOpts = allParams.map(p => `<option value="${esc(p.code)}"${p.code===c.code?' selected':''}>${esc(p.name||p.code)}</option>`).join('');
       const valId = `fld-fc-${field}-${bi}-${gi}-${ci}`;
       let valInput;
-      if (pType === 'List') {
-        const vals = (param.defaultVal||'').split(';').filter(Boolean);
+      if (pType === 'List' || pType === 'Image') {
+        const vals = getParamOptionValues(param);
         valInput = `<select id="${valId}" class="fb-val-inp" onchange="updateFieldBranchCond(${ti},${oi},'${field}',${bi},${gi},${ci},'value',this.value)">${vals.map(v=>`<option value="${esc(v)}"${c.value===v?' selected':''}>${esc(v)}</option>`).join('')}</select>`;
       } else if (pType === 'Boolean') {
         valInput = `<select id="${valId}" class="fb-val-inp" onchange="updateFieldBranchCond(${ti},${oi},'${field}',${bi},${gi},${ci},'value',this.value)"><option value="True"${c.value==='True'?' selected':''}>True</option><option value="False"${c.value==='False'?' selected':''}>False</option></select>`;
@@ -660,8 +721,8 @@ function renderOpProtocolSection(ti, oi) {
       const paramOpts = allParams.map(p => `<option value="${esc(p.code)}"${p.code===c.code?' selected':''}>${esc(p.name||p.code)}</option>`).join('');
       const valId = `fld-pbc-${bi}-${gi}-${ci}`;
       let valInput;
-      if (pType === 'List') {
-        const vals = (param.defaultVal||'').split(';').filter(Boolean);
+      if (pType === 'List' || pType === 'Image') {
+        const vals = getParamOptionValues(param);
         valInput = `<select id="${valId}" class="fb-val-inp" onchange="updateProtoBranchCondField(${ti},${oi},${bi},${gi},${ci},'value',this.value)">${vals.map(v=>`<option value="${esc(v)}"${c.value===v?' selected':''}>${esc(v)}</option>`).join('')}</select>`;
       } else if (pType === 'Boolean') {
         valInput = `<select id="${valId}" class="fb-val-inp" onchange="updateProtoBranchCondField(${ti},${oi},${bi},${gi},${ci},'value',this.value)"><option value="True"${c.value==='True'?' selected':''}>True</option><option value="False"${c.value==='False'?' selected':''}>False</option></select>`;
@@ -774,27 +835,27 @@ function renderProtocolLines(ti, oi, lines) {
   ).join('')}</div>`;
 }
 
-function renderParamsTable(scope, ti, oi, params, dupCodes) {
+function renderParamsTable(scope, ti, oi, si, params, dupCodes) {
   const rows = params.map((p, pi) => {
     const isErr = p.code && dupCodes.has(p.code);
     return `<tr draggable="true"
-      ondragstart="paramDragStart(event,'${scope}',${ti},${oi},${pi})"
+      ondragstart="paramDragStart(event,'${scope}',${ti},${oi},${si === null ? 'null' : si},${pi})"
       ondragover="paramDragOver(event,${pi})"
       ondragleave="paramDragLeave(event)"
-      ondrop="paramDrop(event,'${scope}',${ti},${oi},${pi})"
+      ondrop="paramDrop(event,'${scope}',${ti},${oi},${si === null ? 'null' : si},${pi})"
       ondragend="paramDragEnd(event)">
       <td class="col-ctl"><span class="param-grip" title="Перетащить" onmousedown="paramGripMouseDown()">⠿</span></td>
-      <td><input id="fld-pn-${pi}" type="text" value="${esc(p.name)}" oninput="updateParam('${scope}',${ti},${oi},${pi},'name',this.value)" placeholder="Название"></td>
-      <td><input id="fld-p-${pi}" type="text" maxlength="10" value="${esc(p.code)}" oninput="updateParam('${scope}',${ti},${oi},${pi},'code',this.value)" placeholder="Код" class="${isErr ? 'err' : ''}"></td>
+      <td><input id="fld-pn-${pi}" type="text" value="${esc(p.name)}" oninput="updateParam('${scope}',${ti},${oi},${si === null ? 'null' : si},${pi},'name',this.value)" placeholder="Название"></td>
+      <td><input id="fld-p-${pi}" type="text" maxlength="10" value="${esc(p.code)}" oninput="updateParam('${scope}',${ti},${oi},${si === null ? 'null' : si},${pi},'code',this.value)" placeholder="Код" class="${isErr ? 'err' : ''}"></td>
       <td>
-        <select onchange="updateParamType('${scope}',${ti},${oi},${pi},this.value)">
-          ${['List','CoefList','String','Integer','Float','Date','Boolean'].map(t =>
+        <select onchange="updateParamType('${scope}',${ti},${oi},${si === null ? 'null' : si},${pi},this.value)">
+          ${['List','CoefList','Image','String','Integer','Float','Date','Boolean'].map(t =>
             `<option value="${t}"${p.type===t?' selected':''}>${t}</option>`
           ).join('')}
         </select>
       </td>
-      <td>${renderDefaultCell(scope, ti, oi, pi, p)}</td>
-      <td class="col-del"><button class="tbl-btn del-btn" onclick="deleteParam('${scope}',${ti},${oi},${pi})">✕</button></td>
+      <td>${renderDefaultCell(scope, ti, oi, si, pi, p)}</td>
+      <td class="col-del"><button class="tbl-btn del-btn" onclick="deleteParam('${scope}',${ti},${oi},${si === null ? 'null' : si},${pi})">✕</button></td>
     </tr>`;
   }).join('');
 
@@ -957,42 +1018,71 @@ function renderTableEditor(idx) {
   }
 }
 
-function renderDefaultCell(scope, ti, oi, pi, p) {
-  const upd = `updateParam('${scope}',${ti},${oi},${pi},'defaultVal',`;
+function renderDefaultCell(scope, ti, oi, si, pi, p) {
+  const siArg = si === null ? 'null' : si;
+  const upd = `updateParam('${scope}',${ti},${oi},${siArg},${pi},'defaultVal',`;
   switch (p.type) {
     case 'List': {
-      const key = `${scope}-${ti}-${oi}-${pi}`;
+      const key = `${scope}-${ti}-${oi}-${si === null ? 'x' : si}-${pi}`;
       const items = (p.defaultVal || '').split(';').filter(s => s.length > 0);
-      return `<div class="list-editor"><div id="lt-${key}" class="list-tags">${buildListChips(scope,ti,oi,pi,items)}</div><input class="list-add-input" type="text" placeholder="Новый вариант + Enter" onkeydown="if(event.key==='Enter'){addListItem('${scope}',${ti},${oi},${pi},this);event.preventDefault()}"></div>`;
+      return `<div class="list-editor"><div id="lt-${key}" class="list-tags">${buildListChips(scope,ti,oi,si,pi,items)}</div><input class="list-add-input" type="text" placeholder="Новый вариант + Enter" onkeydown="if(event.key==='Enter'){addListItem('${scope}',${ti},${oi},${siArg},${pi},this);event.preventDefault()}"></div>`;
     }
     case 'CoefList': {
-      const key = `${scope}-${ti}-${oi}-${pi}`;
+      const key = `${scope}-${ti}-${oi}-${si === null ? 'x' : si}-${pi}`;
       const items = p.items || [];
       const rows = items.map((it, ii) =>
         `<div class="coef-item-row" draggable="true"
-           ondragstart="coefItemDragStart(event,'${scope}',${ti},${oi},${pi},${ii})"
+           ondragstart="coefItemDragStart(event,'${scope}',${ti},${oi},${siArg},${pi},${ii})"
            ondragover="coefItemDragOver(event,${ii})"
            ondragleave="coefItemDragLeave(event)"
            ondragend="coefItemDragEnd(event)"
-           ondrop="coefItemDrop(event,'${scope}',${ti},${oi},${pi},${ii})">
+           ondrop="coefItemDrop(event,'${scope}',${ti},${oi},${siArg},${pi},${ii})">
           <span class="param-grip" onmousedown="coefItemGripMouseDown()">⠿</span>
           <input type="text" class="coef-label-inp" value="${esc(it.label)}" placeholder="Описание"
             ondragstart="event.stopPropagation()"
-            oninput="updateCoefItem('${scope}',${ti},${oi},${pi},${ii},'label',this.value)">
+            oninput="updateCoefItem('${scope}',${ti},${oi},${siArg},${pi},${ii},'label',this.value)">
           <input type="number" step="0.1" class="coef-val-inp" value="${it.value}"
             ondragstart="event.stopPropagation()"
-            oninput="updateCoefItem('${scope}',${ti},${oi},${pi},${ii},'value',parseFloat(this.value)||1)">
-          <button class="tbl-btn del-btn" onclick="deleteCoefItem('${scope}',${ti},${oi},${pi},${ii})">✕</button>
+            oninput="updateCoefItem('${scope}',${ti},${oi},${siArg},${pi},${ii},'value',parseFloat(this.value)||1)">
+          <button class="tbl-btn del-btn" onclick="deleteCoefItem('${scope}',${ti},${oi},${siArg},${pi},${ii})">✕</button>
         </div>`
       ).join('');
       return `<div class="coef-list-editor">
         <div class="coef-max-row">
           <span>Макс. выборов:</span>
           <input type="number" step="1" min="1" max="${items.length || 1}" value="${p.maxSelect || 1}"
-            oninput="updateCoefMaxSelect('${scope}',${ti},${oi},${pi},parseInt(this.value)||1)">
+            oninput="updateCoefMaxSelect('${scope}',${ti},${oi},${siArg},${pi},parseInt(this.value)||1)">
         </div>
         <div id="cl-${key}" class="coef-items">${rows}</div>
-        <button class="tbl-btn" style="margin-top:4px" onclick="addCoefItem('${scope}',${ti},${oi},${pi})">+ Добавить</button>
+        <button class="tbl-btn" style="margin-top:4px" onclick="addCoefItem('${scope}',${ti},${oi},${siArg},${pi})">+ Добавить</button>
+      </div>`;
+    }
+    case 'Image': {
+      const items = p.items || [];
+      const rows = items.map((it, ii) =>
+        `<div class="coef-item-row image-item-row" draggable="true"
+           ondragstart="coefItemDragStart(event,'${scope}',${ti},${oi},${siArg},${pi},${ii})"
+           ondragover="coefItemDragOver(event,${ii})"
+           ondragleave="coefItemDragLeave(event)"
+           ondragend="coefItemDragEnd(event)"
+           ondrop="coefItemDrop(event,'${scope}',${ti},${oi},${siArg},${pi},${ii})">
+          <span class="param-grip" onmousedown="coefItemGripMouseDown()">⠿</span>
+          <input type="text" value="${esc(it.label)}" class="${String(it.label || '').trim() ? '' : 'err'}"
+            ondragstart="event.stopPropagation()"
+            oninput="updateImageItem('${scope}',${ti},${oi},${siArg},${pi},${ii},'label',this.value,this)">
+          <input type="text" value="${esc(it.document)}" class="${String(it.document || '').trim() ? '' : 'err'}"
+            ondragstart="event.stopPropagation()"
+            oninput="updateImageItem('${scope}',${ti},${oi},${siArg},${pi},${ii},'document',this.value,this)">
+          <input type="text" value="${esc(it.file)}" class="${String(it.file || '').trim() ? '' : 'err'}"
+            ondragstart="event.stopPropagation()"
+            oninput="updateImageItem('${scope}',${ti},${oi},${siArg},${pi},${ii},'file',this.value,this)">
+          <button class="tbl-btn del-btn" onclick="deleteImageItem('${scope}',${ti},${oi},${siArg},${pi},${ii})">✕</button>
+        </div>`
+      ).join('');
+      return `<div class="coef-list-editor image-list-editor">
+        <div class="image-items-head"><span></span><span>Название пункта</span><span>Обозначение документа</span><span>Наименование файла</span><span></span></div>
+        <div class="coef-items">${rows}</div>
+        <button class="tbl-btn" style="margin-top:4px" onclick="addImageItem('${scope}',${ti},${oi},${siArg},${pi})">+ Добавить</button>
       </div>`;
     }
     case 'String':  return `<input type="text" value="${esc(p.defaultVal)}" oninput="${upd}this.value)">`;
@@ -1062,4 +1152,3 @@ function refreshTableDups(idx) {
       : '';
   }
 }
-
